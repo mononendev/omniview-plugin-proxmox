@@ -1,0 +1,26 @@
+id: proxmox
+version: 0.1.0
+name: Proxmox VE
+icon: SiProxmox
+description: Browse Proxmox VE clusters, nodes, virtual machines, containers and storage.
+repository: github.com/mononendev/omniview-plugin-proxmox
+website: www.proxmox.com
+category: cloud
+license: Apache-2.0
+author:
+    name: Alex Mononen
+    email: alex@mononen.dev
+    url: https://mononen.dev
+maintainers:
+    - name: Alex Mononen
+      email: alex@mononen.dev
+tags:
+    - proxmox
+    - virtualization
+    - homelab
+capabilities:
+    - resource
+    - ui
+theme:
+    colors:
+        primary: '#E57000'
