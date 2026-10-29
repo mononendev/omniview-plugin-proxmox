@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -12,16 +13,16 @@ import (
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
 
-// pollInterval is how often Watch re-reads /cluster/resources.
+// pollInterval is how often Watch re-reads a kind.
 const pollInterval = 10 * time.Second
 
-var _ sdkresource.Watcher[proxmox.Client] = (*clusterResourcer)(nil)
+var _ sdkresource.Watcher[proxmox.Client] = (*listResourcer)(nil)
 
-// Watch polls /cluster/resources, which has no change feed, and emits the
+// Watch polls the kind, which has no change feed in Proxmox, and emits the
 // difference to the previous poll. A failed poll is reported as watch state
 // and polling continues, so a cluster that is briefly unreachable recovers
 // without exhausting the SDK's watch retries.
-func (r *clusterResourcer) Watch(
+func (r *listResourcer) Watch(
 	ctx context.Context,
 	client *proxmox.Client,
 	meta sdkresource.ResourceMeta,
@@ -43,7 +44,7 @@ func (r *clusterResourcer) Watch(
 }
 
 type pollWatch struct {
-	resourcer *clusterResourcer
+	resourcer *listResourcer
 	client    *proxmox.Client
 	key       string
 	sink      sdkresource.WatchEventSink
@@ -55,18 +56,21 @@ type pollWatch struct {
 }
 
 func (w *pollWatch) poll(ctx context.Context) {
-	entries, err := w.resourcer.entries(ctx, w.client)
+	entries, err := w.resourcer.list(ctx, w.client)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
 		}
 		w.synced = false
 		state, code := sdkresource.WatchStateError, "PROVIDER_ERROR"
+		var cephErr *proxmox.CephUnavailableError
 		switch {
 		case proxmox.IsStatus(err, http.StatusForbidden):
 			state, code = sdkresource.WatchStateForbidden, "FORBIDDEN"
 		case proxmox.IsStatus(err, http.StatusUnauthorized):
 			state, code = sdkresource.WatchStateForbidden, "UNAUTHORIZED"
+		case errors.As(err, &cephErr):
+			code = "CEPH_UNAVAILABLE"
 		}
 		w.sink.OnStateChange(sdkresource.WatchStateEvent{
 			ResourceKey: w.key, State: state, Error: err, Message: err.Error(), ErrorCode: code,

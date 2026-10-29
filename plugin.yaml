@@ -2,7 +2,7 @@ id: proxmox
 version: 0.1.0
 name: Proxmox VE
 icon: SiProxmox
-description: Browse Proxmox VE clusters, nodes, virtual machines, containers and storage.
+description: Browse Proxmox VE clusters, nodes, virtual machines, containers, storage and Ceph.
 repository: github.com/mononendev/omniview-plugin-proxmox
 website: www.proxmox.com
 category: cloud
@@ -18,6 +18,7 @@ tags:
     - proxmox
     - virtualization
     - homelab
+    - ceph
 capabilities:
     - resource
     - ui

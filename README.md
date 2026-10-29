@@ -1,11 +1,14 @@
 # Omniview Proxmox VE plugin
 
-Browse Proxmox VE clusters in Omniview: nodes, storage, QEMU virtual machines and LXC containers. Read-only for now.
+Browse Proxmox VE clusters in Omniview: nodes, storage, QEMU virtual machines, LXC containers and
+the cluster's Ceph (status, pools, OSDs, monitors, managers, metadata servers, CephFS). Read-only
+for now.
 
 ## Setup
 
 The plugin talks to the Proxmox VE API with a read-only API token. One API endpoint serves the
-whole cluster: `/cluster/resources` on any node lists every node, guest and storage.
+whole cluster: `/cluster/resources` on any node lists every node, guest and storage, and Ceph
+requests are forwarded to a node that runs Ceph. `PVEAuditor` covers Ceph as well.
 
 ### 1. Create a read-only token
 
@@ -82,7 +85,8 @@ workspace, `omniview-dev plugin dev restart proxmox`) after adding or removing c
 existing entry apply on its next connect.
 
 Open **Proxmox VE** in the sidebar and click the cluster row; it connects and opens the virtual
-machine table. While connected the plugin issues four GET requests every 10 seconds.
+machine table. While connected the plugin issues four GET requests every 10 seconds, plus one per
+Ceph view opened since connecting.
 
 A failed connect shows one of these errors:
 
@@ -108,13 +112,28 @@ pveum user delete omniview@pve
 | `proxmox::v1::Storage` | `GET /cluster/resources?type=storage` |
 | `proxmox::v1::VirtualMachine` | `GET /cluster/resources?type=vm`, `type == qemu` |
 | `proxmox::v1::Container` | `GET /cluster/resources?type=vm`, `type == lxc` |
+| `proxmox::v1::CephCluster` | `GET /nodes/{node}/ceph/status`, one object |
+| `proxmox::v1::CephPool` | `GET /nodes/{node}/ceph/pool` |
+| `proxmox::v1::CephOSD` | `GET /nodes/{node}/ceph/osd`, the `osd` leaves of the CRUSH tree |
+| `proxmox::v1::CephMonitor` | `GET /nodes/{node}/ceph/mon` |
+| `proxmox::v1::CephManager` | `GET /nodes/{node}/ceph/mgr` |
+| `proxmox::v1::CephMetadataServer` | `GET /nodes/{node}/ceph/mds` |
+| `proxmox::v1::CephFilesystem` | `GET /nodes/{node}/ceph/fs` |
 
-Objects are the unmodified API entries. Their ID is Proxmox's cluster-unique `id`
-(`node/pve1`, `qemu/100`, `storage/pve1/local`); nodes are not mapped onto namespaces.
+Objects are the unmodified API entries. Cluster resources are identified by Proxmox's
+cluster-unique `id` (`node/pve1`, `qemu/100`, `storage/pve1/local`); nodes are not mapped onto
+namespaces. Ceph objects have no such `id` and are identified by their Ceph name: the cluster
+`fsid`, `pool_name`, or `name` (`osd.3`, monitor/manager/MDS IDs, file system name).
+
+Ceph state is cluster-wide but Proxmox serves it only from nodes with Ceph installed. A Ceph
+request goes to the node that answered the previous one, falling back to every other online node
+in name order. If none answers, the request fails with `CEPH_UNAVAILABLE` and each node's error;
+that is expected on a cluster without Ceph, since the Ceph kinds are listed for every cluster.
 
 Proxmox has no change feed, so while a connection is open each kind is re-read every 10 seconds
-and changes are pushed to the UI as watch events. An unreachable cluster shows as a watch error
-and recovers on the next successful poll.
+and changes are pushed to the UI as watch events. Cluster kinds are watched from connect; a Ceph
+kind from the first time its view is opened. An unreachable cluster shows as a watch error and
+recovers on the next successful poll.
 
 Table columns are defined in `ui/src/utils/columns.ts`. The resource transport has no RPC that
 delivers a backend `ResourceDefinition` to the UI, so the backend registers none.

@@ -1,17 +1,17 @@
 import { DescriptionList, Stack, StatusDot, Text } from '@omniviewdev/base-ui';
 
-import { type Column, type ProxmoxObject, columnStatus, formatValue } from '../utils/columns';
+import { type Column, type NativeObject, columnStatus, fieldValue, formatValue } from '../utils/columns';
 
 const sectionTitleStyle = { margin: '4px 0' } as const;
 
 type Props = {
-  data?: ProxmoxObject;
+  data?: NativeObject;
   columns: Column[];
 };
 
 /**
  * Generic detail view: the kind's table columns first (formatted the same
- * way as the table), then every other raw field of the Proxmox entry.
+ * way as the table), then every other top-level field of the native object.
  */
 export default function ResourceOverview({ data, columns }: Props) {
   if (!data) return null;
@@ -29,7 +29,7 @@ export default function ResourceOverview({ data, columns }: Props) {
         </Text>
         <DescriptionList layout="horizontal" size="sm">
           {columns.map((col) => {
-            const value = data[col.field];
+            const value = fieldValue(data, col.field);
             const status = columnStatus(value, col);
             const text = formatValue(value, col);
             return (

@@ -18,6 +18,7 @@ const (
 
 	categoryCluster = "Cluster"
 	categoryCompute = "Compute"
+	categoryCeph    = "Ceph"
 )
 
 var (
@@ -37,26 +38,65 @@ var (
 		Group: group, Version: version, Kind: "Container", Label: "Containers", Category: categoryCompute,
 		Description: "LXC guests.",
 	}
+	metaCephCluster = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephCluster", Label: "Ceph Status", Category: categoryCeph,
+		Description: "Health and capacity of the Ceph cluster (ceph status).",
+	}
+	metaCephPool = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephPool", Label: "Pools", Category: categoryCeph,
+		Description: "Ceph pools.",
+	}
+	metaCephOSD = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephOSD", Label: "OSDs", Category: categoryCeph,
+		Description: "Ceph object storage daemons.",
+	}
+	metaCephMonitor = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephMonitor", Label: "Monitors", Category: categoryCeph,
+		Description: "Ceph monitor daemons.",
+	}
+	metaCephManager = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephManager", Label: "Managers", Category: categoryCeph,
+		Description: "Ceph manager daemons.",
+	}
+	metaCephMDS = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephMetadataServer", Label: "Metadata Servers", Category: categoryCeph,
+		Description: "CephFS metadata server daemons.",
+	}
+	metaCephFS = sdkresource.ResourceMeta{
+		Group: group, Version: version, Kind: "CephFilesystem", Label: "CephFS", Category: categoryCeph,
+		Description: "CephFS file systems.",
+	}
 )
 
 // Register adds the resource capability to plugin. Registrations carry no
 // ResourceDefinition: no RPC delivers definitions to the UI, which owns the
-// table columns (ui/src/utils/columns.ts).
+// table columns (ui/src/utils/columns.ts). Ceph kinds are registered for
+// every cluster; one without Ceph answers them with CEPH_UNAVAILABLE.
 func Register(plugin *sdk.Plugin) {
 	cfg := sdkresource.ResourcePluginConfig[proxmox.Client]{
 		Connections: &connectionProvider{},
 		Resources: []sdkresource.ResourceRegistration[proxmox.Client]{
-			{Meta: metaNode, Resourcer: &clusterResourcer{apiType: proxmox.ResourceTypeNode, entryType: "node"}},
-			{Meta: metaStorage, Resourcer: &clusterResourcer{apiType: proxmox.ResourceTypeStorage, entryType: "storage"}},
-			{Meta: metaVM, Resourcer: &clusterResourcer{apiType: proxmox.ResourceTypeVM, entryType: "qemu"}},
-			{Meta: metaContainer, Resourcer: &clusterResourcer{apiType: proxmox.ResourceTypeVM, entryType: "lxc"}},
+			{Meta: metaNode, Resourcer: clusterKind("node", proxmox.ResourceTypeNode, "node")},
+			{Meta: metaStorage, Resourcer: clusterKind("storage", proxmox.ResourceTypeStorage, "storage")},
+			{Meta: metaVM, Resourcer: clusterKind("virtual machine", proxmox.ResourceTypeVM, "qemu")},
+			{Meta: metaContainer, Resourcer: clusterKind("container", proxmox.ResourceTypeVM, "lxc")},
+			{Meta: metaCephCluster, Resourcer: cephKind("Ceph cluster", (*proxmox.Client).CephStatus)},
+			{Meta: metaCephPool, Resourcer: cephKind("Ceph pool", (*proxmox.Client).CephPools)},
+			{Meta: metaCephOSD, Resourcer: cephKind("Ceph OSD", (*proxmox.Client).CephOSDs)},
+			{Meta: metaCephMonitor, Resourcer: cephKind("Ceph monitor", (*proxmox.Client).CephMonitors)},
+			{Meta: metaCephManager, Resourcer: cephKind("Ceph manager", (*proxmox.Client).CephManagers)},
+			{Meta: metaCephMDS, Resourcer: cephKind("Ceph metadata server", (*proxmox.Client).CephMetadataServers)},
+			{Meta: metaCephFS, Resourcer: cephKind("CephFS", (*proxmox.Client).CephFilesystems)},
 		},
 		Groups: []sdkresource.ResourceGroup{{
 			ID:          group,
 			Name:        "Proxmox VE",
 			Description: "Proxmox VE cluster resources",
 			Resources: map[string][]sdkresource.ResourceMeta{
-				version: {metaNode, metaStorage, metaVM, metaContainer},
+				version: {
+					metaNode, metaStorage, metaVM, metaContainer,
+					metaCephCluster, metaCephPool, metaCephOSD, metaCephMonitor, metaCephManager, metaCephMDS, metaCephFS,
+				},
 			},
 		}},
 	}

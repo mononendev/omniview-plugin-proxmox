@@ -58,7 +58,7 @@ func TestPollEmitsChangesAndStateTransitions(t *testing.T) {
 
 	sink := &recordingSink{}
 	w := pollWatch{
-		resourcer: &clusterResourcer{apiType: proxmox.ResourceTypeVM, entryType: "qemu"},
+		resourcer: clusterKind("virtual machine", proxmox.ResourceTypeVM, "qemu"),
 		client:    client,
 		key:       metaVM.Key(),
 		sink:      sink,
