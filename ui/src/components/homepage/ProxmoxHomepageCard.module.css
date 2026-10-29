@@ -1,0 +1,173 @@
+.SectionTitle {
+  padding: 10px 4px 4px;
+  color: var(--ov-color-fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+}
+
+.Note {
+  padding: 4px;
+}
+
+.TileGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px;
+}
+
+.Tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ov-color-border-default);
+  background-color: var(--ov-color-bg-surface);
+  transition: border-color 0.15s;
+  min-width: 0;
+}
+
+.Tile:hover {
+  border-color: var(--ov-color-border-strong);
+}
+
+.TileHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Buttons inside a tile: name, per-kind counts. Reset to text, highlight on hover. */
+.Link {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.Link:hover {
+  color: var(--ov-color-fg-default);
+  background-color: var(--ov-color-state-hover);
+}
+
+.Link:focus-visible {
+  outline: 2px solid var(--ov-color-brand-500);
+  outline-offset: 1px;
+}
+
+.Name {
+  flex: 1;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ov-color-fg-default);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.Name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.Disconnect {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.Tile:hover .Disconnect,
+.Disconnect:focus-visible {
+  opacity: 1;
+}
+
+.Counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.Count {
+  padding: 1px 3px;
+  font-size: 0.72rem;
+  color: var(--ov-color-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.Count[data-down='true'] {
+  color: var(--ov-color-danger);
+}
+
+.Usage {
+  display: grid;
+  grid-template-columns: auto 1fr 3.2em;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 0.65rem;
+  color: var(--ov-color-fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.UsageLabel {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.UsageValue {
+  text-align: right;
+}
+
+.Problem {
+  font-size: 0.72rem;
+  color: var(--ov-color-danger);
+}
+
+.ChipGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.Chip {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--ov-color-border-default);
+  background-color: var(--ov-color-bg-surface);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ov-color-fg-default);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.Chip:hover:not(:disabled) {
+  border-color: var(--ov-color-border-strong);
+  background-color: var(--ov-color-state-hover);
+}
+
+.Chip:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.Chip:focus-visible {
+  outline: 2px solid var(--ov-color-brand-500);
+  outline-offset: 2px;
+}
+
+.Chip > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

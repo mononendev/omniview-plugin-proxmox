@@ -119,6 +119,17 @@ and recovers on the next successful poll.
 Table columns are defined in `ui/src/utils/columns.ts`. The resource transport has no RPC that
 delivers a backend `ResourceDefinition` to the UI, so the backend registers none.
 
+## Homepage card
+
+The plugin adds a **Proxmox VE** card to the Omniview home page with two sections, both
+toggleable in the card's settings (**Edit Layout** → gear):
+
+- **connected**: one tile per open connection, with online nodes, running VMs and running
+  containers (templates excluded), plus CPU and memory use across online nodes (CPU weighted by
+  core count). Meters turn amber above 60 % and red above 85 %. The name opens the cluster; each
+  count opens that table. Figures come from the same 10-second poll as the tables.
+- **disconnected**: configured clusters that are not connected; clicking one connects and opens it.
+
 ## Development
 
 ```sh
