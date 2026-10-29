@@ -135,7 +135,11 @@ func shellHandler(clients clientFunc, resolve targetFunc) sdkexec.TTYHandlerFunc
 		if ctx == nil || ctx.Context == nil {
 			return errors.New("no session context")
 		}
-		s := &shellSession{tty: tty, stopCh: stopCh, logger: ctx.Logger, done: make(chan struct{})}
+		own, err := pollableTTY(tty)
+		if err != nil {
+			return fmt.Errorf("duplicate pty: %w", err)
+		}
+		s := &shellSession{tty: own, stopCh: stopCh, logger: ctx.Logger, done: make(chan struct{})}
 		go s.watch(ctx.Context, resize)
 		go s.connect(ctx, opts, clients, resolve)
 		return nil
@@ -144,6 +148,8 @@ func shellHandler(clients clientFunc, resolve targetFunc) sdkexec.TTYHandlerFunc
 
 // shellSession bridges a PTY and a termproxy terminal.
 type shellSession struct {
+	// tty is the session's own non-blocking duplicate of the PTY slave
+	// (see pollableTTY); finish closes it.
 	tty    *os.File
 	stopCh chan error
 	logger logging.Logger
@@ -222,16 +228,18 @@ func (s *shellSession) resize(term *proxmox.Terminal, r sdkexec.SessionResizeInp
 	}
 }
 
-// finish ends the session once: it closes the websocket, if connected (a
-// normal closure that stops the console), and reports err to the manager.
-// stopCh holds one value and only finish sends, so it gets exactly one
-// value and the send never blocks.
+// finish ends the session once: it closes the session's PTY duplicate
+// (releasing the slave so the manager's master Read sees the hangup) and
+// the websocket, if connected (a normal closure that stops the console),
+// and reports err to the manager. stopCh holds one value and only finish
+// sends, so it gets exactly one value and the send never blocks.
 func (s *shellSession) finish(err error) {
 	s.once.Do(func() {
 		s.mu.Lock()
 		close(s.done)
 		term := s.term
 		s.mu.Unlock()
+		_ = s.tty.Close()
 		if term != nil {
 			if cerr := term.Close(); cerr != nil && s.logger != nil {
 				s.logger.Warnw(context.Background(), "close terminal websocket", "error", cerr)
