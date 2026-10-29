@@ -2,11 +2,11 @@ import {
   PluginWindow,
   RESOURCE_ICON_EXTENSION_POINT_ID,
   type ExtensionRegistration,
-  type ResourceIconSetV1,
   type SearchRouteHandleV1,
 } from '@omniviewdev/runtime';
 import type { RouteObject } from 'react-router-dom';
 
+import ProxmoxHomepageCard, { proxmoxHomepageCardMeta } from './components/homepage/ProxmoxHomepageCard';
 import { PLUGIN_ID } from './constants';
 import { proxmoxResourceIconSet } from './icons/resourceIcons';
 import ConnectionLayout from './pages/ConnectionLayout';
@@ -34,7 +34,7 @@ const routes: RouteObject[] = [
   },
 ];
 
-export const extensionRegistrations: ExtensionRegistration<ResourceIconSetV1>[] = [
+export const extensionRegistrations: ExtensionRegistration[] = [
   {
     extensionPointId: RESOURCE_ICON_EXTENSION_POINT_ID,
     registration: {
@@ -42,6 +42,16 @@ export const extensionRegistrations: ExtensionRegistration<ResourceIconSetV1>[] 
       plugin: PLUGIN_ID,
       label: 'Proxmox VE resource icons',
       value: proxmoxResourceIconSet,
+    },
+  },
+  {
+    extensionPointId: 'omniview/home/card',
+    registration: {
+      id: 'proxmox/home/card',
+      plugin: PLUGIN_ID,
+      label: 'Proxmox VE',
+      value: ProxmoxHomepageCard,
+      meta: proxmoxHomepageCardMeta,
     },
   },
 ];
