@@ -135,7 +135,7 @@ func TestLifecycleActionPostsAndWaitsForTask(t *testing.T) {
 	f.exitStatus = "can't lock file '/var/lock/qemu-server/lock-100.conf' - got timeout"
 	_, err = vms.ExecuteAction(ctx, client, metaVM, "stop", sdkresource.ActionInput{ID: "qemu/100"})
 	opErr := opError(t, vms, err)
-	if opErr.Code != "TASK_FAILED" || !strings.Contains(opErr.Message, "got timeout") {
+	if opErr.Code != "PROVIDER_ERROR" || opErr.Title != "Task failed" || !strings.Contains(opErr.Message, "got timeout") {
 		t.Fatalf("unexpected error %+v", opErr)
 	}
 	if f.writes[1].path != "/nodes/pve2/qemu/100/status/stop" {
@@ -237,7 +237,7 @@ func TestUpdateEncodesChangesAndReturnsGuest(t *testing.T) {
 	}
 
 	_, err = cts.Update(ctx, client, metaContainer, sdkresource.UpdateInput{ID: "lxc/200", Input: json.RawMessage(`{"net0":{"x":1}}`)})
-	if opErr := opError(t, cts, err); opErr.Code != "INVALID" {
+	if opErr := opError(t, cts, err); opErr.Code != "INVALID_INPUT" {
 		t.Fatalf("nested value: %+v", opErr)
 	}
 }
@@ -266,7 +266,8 @@ func TestWriteErrorsAreClassified(t *testing.T) {
 	f.writeBody = `{"data":null,"errors":{"cores":"value must have a minimum value of 1","memory":"invalid format"}}`
 	_, err = vms.Update(ctx, client, metaVM, sdkresource.UpdateInput{ID: "qemu/100", Input: json.RawMessage(`{"cores":0}`)})
 	opErr = opError(t, vms, err)
-	if opErr.Code != "INVALID" || !strings.Contains(opErr.Message, "cores: value must have a minimum value of 1; memory: invalid format") {
+	want := "Proxmox rejected the request (Bad Request)\ncores: value must have a minimum value of 1\nmemory: invalid format"
+	if opErr.Code != "INVALID_INPUT" || opErr.Message != want {
 		t.Fatalf("update 400: %+v", opErr)
 	}
 

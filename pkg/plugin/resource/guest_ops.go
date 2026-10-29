@@ -252,7 +252,7 @@ func (r *guestResourcer) find(ctx context.Context, client *proxmox.Client, id st
 // form values), the keys to delete and the digest.
 func configChanges(raw json.RawMessage) (map[string]string, []string, string, error) {
 	invalid := func(msg string) error {
-		return &sdkresource.ResourceOperationError{Code: "INVALID", Title: "Invalid configuration", Message: msg}
+		return &sdkresource.ResourceOperationError{Code: "INVALID_INPUT", Title: "Invalid configuration", Message: msg}
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()

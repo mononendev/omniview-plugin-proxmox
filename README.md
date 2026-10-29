@@ -1,14 +1,16 @@
 # Omniview Proxmox VE plugin
 
-Browse Proxmox VE clusters in Omniview: nodes, storage, QEMU virtual machines, LXC containers and
-the cluster's Ceph (status, pools, OSDs, monitors, managers, metadata servers, CephFS). Read-only
-for now.
+Browse and operate Proxmox VE clusters in Omniview: nodes, storage, QEMU virtual machines, LXC
+containers and the cluster's Ceph (status, pools, OSDs, monitors, managers, metadata servers,
+CephFS). Guests can be started, shut down, stopped, rebooted, edited and destroyed; nodes and guests
+have metrics and shells; nodes and Ceph daemons have logs. See [Operations](#operations).
 
 ## Setup
 
-The plugin talks to the Proxmox VE API with a read-only API token. One API endpoint serves the
-whole cluster: `/cluster/resources` on any node lists every node, guest and storage, and Ceph
-requests are forwarded to a node that runs Ceph. `PVEAuditor` covers Ceph as well.
+The plugin talks to the Proxmox VE API with an API token. One API endpoint serves the whole
+cluster: `/cluster/resources` on any node lists every node, guest and storage, and Ceph requests are
+forwarded to a node that runs Ceph. `PVEAuditor` covers browsing, Ceph and metrics; the
+[operations](#operations) need more.
 
 ### 1. Create a read-only token
 
@@ -58,10 +60,22 @@ clusters:
     token_secret: 00000000-0000-0000-0000-000000000000
     # ca_file: ~/.config/omniview-proxmox/homelab-ca.pem   # copy of /etc/pve/pve-root-ca.pem
     # insecure_skip_verify: true
+    # console_user: omniview@pve                # optional, for shells; see below
+    # console_password_file: ~/.config/omniview-proxmox/homelab-console.pw
 ```
 
 Unknown keys, duplicate IDs and a `url` with a path are rejected. The token secret is read from the
 file each time a connection starts and is never sent to the UI.
+
+Shells (node shell, container console, VM serial console) need a user login: Proxmox VE consoles
+reject API tokens ([bug 6079](https://bugzilla.proxmox.com/show_bug.cgi?id=6079)). To enable them,
+set `console_user` (`USER@REALM`, not a token) and exactly one of `console_password` or
+`console_password_file` (a file holding the password; surrounding whitespace is trimmed). Each shell
+logs that user in with `POST /access/ticket`; the password is never sent to the UI or logged. The
+user needs `Sys.Console` on `/nodes/{node}` for node shells and `VM.Console` on the guest for
+consoles, and must not have two-factor authentication. Node shells run as that user, so any user
+other than `root@pam` gets a login prompt. VM consoles use the serial port
+(`qm set <vmid> -serial0 socket`).
 
 The endpoint is a single node: if it is down, the connection fails even when the rest of the
 cluster is up. For a fallback, add a second entry with its own `id` and another node's `url`.
@@ -131,7 +145,7 @@ have no such `id` and are identified by their Ceph name: the cluster `fsid`, `po
 
 Ceph state is cluster-wide but Proxmox serves it only from nodes with Ceph installed. A Ceph
 request goes to the node that answered the previous one, falling back to every other online node
-in name order. If none answers, the request fails with `CEPH_UNAVAILABLE` and each node's error,
+in name order. If none answers, the request fails as `UNAVAILABLE` ("Ceph unavailable") with each node's error,
 e.g. when Ceph stops answering after connect.
 
 The Ceph Status detail view summarises `ceph status` the way `ceph -s` does: health checks with
@@ -175,6 +189,26 @@ In the UI:
 - **Related** (resource drawer): a guest's node and storage, a node's guests and storage, a storage
   entry's node and guests.
 - **Storage** column in the virtual machine and container tables.
+
+## Operations
+
+Guest actions are in the resource drawer's header and in each table row's **…** menu (also on
+right-click). Each needs a privilege beyond `PVEAuditor`; without it the action fails with
+**Forbidden** naming the privilege. `PVEVMAdmin` on `/vms` covers every guest operation.
+
+| Operation | Kinds | API | Privilege |
+| --- | --- | --- | --- |
+| Start, Shutdown, Reboot, Stop, Suspend/Resume (VMs) | VM, CT | `POST …/status/{action}` | `VM.PowerMgmt` |
+| Edit config | VM, CT | `GET`/`PUT …/config`, guarded by the config digest | `VM.Config.*` |
+| Delete (type the VMID; guest must be stopped; purges jobs and unreferenced disks) | VM, CT | `DELETE /nodes/{node}/{qemu,lxc}/{vmid}` | `VM.Allocate` |
+| Shell | Node, CT, VM (serial console) | `termproxy` + `vncwebsocket` | `Sys.Console` / `VM.Console`, plus a console login (see [setup](#3-write-the-config-file)) |
+| Metrics (CPU, memory, network, disk I/O; node load, IO wait, root disk) | Node, VM, CT | `GET …/rrddata` | `Sys.Audit` / `VM.Audit` |
+| Logs (journal of the node or of `ceph-osd@N`, `ceph-mon@…`, `ceph-mgr@…`, `ceph-mds@…`) | Node, Ceph OSD/Monitor/Manager/MDS | `GET /nodes/{node}/syslog` | `Sys.Syslog` |
+
+Writes wait up to a minute for their Proxmox task and report its failure; a task still running then
+is reported as such. Config changes Proxmox cannot apply to a running guest stay pending until its
+next start, as in the Proxmox web UI. The node drawer also has a **Guests** view of the guests on
+that node with their CPU and memory.
 
 ## Summary page
 

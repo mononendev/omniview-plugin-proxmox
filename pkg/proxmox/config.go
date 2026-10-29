@@ -34,6 +34,15 @@ type Cluster struct {
 	CAFile string `yaml:"ca_file"`
 	// InsecureSkipVerify disables TLS verification. Prefer CAFile.
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
+	// ConsoleUser optionally names a PVE user (USER@REALM, no TFA) whose
+	// login ticket opens shells: PVE consoles reject API tokens.
+	ConsoleUser string `yaml:"console_user"`
+	// ConsolePassword is ConsoleUser's password. Exclusive with
+	// ConsolePasswordFile.
+	ConsolePassword string `yaml:"console_password"`
+	// ConsolePasswordFile is a file holding ConsoleUser's password,
+	// read (and trimmed) at each console login.
+	ConsolePasswordFile string `yaml:"console_password_file"`
 }
 
 type configFile struct {
@@ -112,8 +121,31 @@ func (c Cluster) validate() error {
 	if c.TokenSecret == "" {
 		return fmt.Errorf("cluster %q: token_secret is required", c.ID)
 	}
+	if err := c.validateConsole(); err != nil {
+		return fmt.Errorf("cluster %q: %w", c.ID, err)
+	}
 	if _, err := c.apiBase(); err != nil {
 		return fmt.Errorf("cluster %q: %w", c.ID, err)
+	}
+	return nil
+}
+
+// validateConsole checks the optional console login: a user with exactly one
+// password source. Errors never include the password.
+func (c Cluster) validateConsole() error {
+	hasPassword := c.ConsolePassword != ""
+	hasFile := c.ConsolePasswordFile != ""
+	switch {
+	case c.ConsoleUser == "" && (hasPassword || hasFile):
+		return errors.New("console_password and console_password_file require console_user")
+	case c.ConsoleUser == "":
+		return nil
+	case !strings.Contains(c.ConsoleUser, "@") || strings.Contains(c.ConsoleUser, "!"):
+		return fmt.Errorf("console_user %q must be a user USER@REALM, not an API token", c.ConsoleUser)
+	case hasPassword && hasFile:
+		return errors.New("set only one of console_password and console_password_file")
+	case !hasPassword && !hasFile:
+		return errors.New("console_user requires console_password or console_password_file")
 	}
 	return nil
 }

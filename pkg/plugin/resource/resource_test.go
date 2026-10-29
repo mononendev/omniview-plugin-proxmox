@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
@@ -23,6 +24,8 @@ clusters:
     url: https://pve.lan:8006
     token_id: root@pam!omni
     token_secret: s3cret
+    console_user: omniview@pve
+    console_password: c0nsole-pw
 `
 	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -36,8 +39,8 @@ clusters:
 		t.Fatalf("unexpected connections: %+v", conns)
 	}
 	for k, v := range conns[0].Data {
-		if v == "s3cret" {
-			t.Fatalf("token secret exposed in Connection.Data[%q]", k)
+		if s, _ := v.(string); strings.Contains(s, "s3cret") || strings.Contains(s, "c0nsole-pw") {
+			t.Fatalf("secret exposed in Connection.Data[%q]", k)
 		}
 	}
 
@@ -94,8 +97,8 @@ func TestCephKindOnClusterWithoutCephIsCephUnavailable(t *testing.T) {
 
 	_, err = pools.List(context.Background(), client, metaCephPool, sdkresource.ListInput{})
 	var opErr *sdkresource.ResourceOperationError
-	if !errors.As(pools.ClassifyError(err), &opErr) || opErr.Code != "CEPH_UNAVAILABLE" {
-		t.Fatalf("want CEPH_UNAVAILABLE, got %v", pools.ClassifyError(err))
+	if !errors.As(pools.ClassifyError(err), &opErr) || opErr.Code != "UNAVAILABLE" || opErr.Title != "Ceph unavailable" {
+		t.Fatalf("want Ceph unavailable, got %v", pools.ClassifyError(err))
 	}
 }
 

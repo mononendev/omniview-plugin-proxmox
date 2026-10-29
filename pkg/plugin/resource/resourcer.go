@@ -184,7 +184,7 @@ func (r *listResourcer) ClassifyError(err error) error {
 		}
 	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest:
 		return &sdkresource.ResourceOperationError{
-			Err: err, Code: "INVALID", Title: "Rejected by Proxmox", Message: invalidMessage(apiErr),
+			Err: err, Code: "INVALID_INPUT", Title: "Rejected by Proxmox", Message: invalidMessage(apiErr),
 		}
 	case errors.As(err, &taskErr):
 		what := "The Proxmox task"
@@ -192,7 +192,7 @@ func (r *listResourcer) ClassifyError(err error) error {
 			what = "The task to " + writeErr.what
 		}
 		return &sdkresource.ResourceOperationError{
-			Err: err, Code: "TASK_FAILED", Title: "Task failed",
+			Err: err, Code: "PROVIDER_ERROR", Title: "Task failed",
 			Message: what + " failed: " + taskErr.ExitStatus,
 		}
 	case proxmox.IsStatus(err, http.StatusUnauthorized):
@@ -208,7 +208,7 @@ func (r *listResourcer) ClassifyError(err error) error {
 		}
 	case errors.As(err, &cephErr):
 		return &sdkresource.ResourceOperationError{
-			Err: err, Code: "CEPH_UNAVAILABLE", Title: "Ceph unavailable", Message: err.Error(),
+			Err: err, Code: "UNAVAILABLE", Title: "Ceph unavailable", Message: err.Error(),
 			Suggestions: []string{
 				"Ceph must be installed and initialised (pveceph install, pveceph init) on an online node, with its monitors in quorum.",
 				"A cluster without Ceph can ignore the Ceph section.",
@@ -221,23 +221,21 @@ func (r *listResourcer) ClassifyError(err error) error {
 	}
 }
 
-// invalidMessage renders a 400 response: Proxmox's reason followed by its
-// per-parameter errors, sorted by parameter.
+// invalidMessage renders a 400 response: a first line with Proxmox's reason
+// (no "word: " pair in it), then one "param: reason" line per parameter
+// error, sorted by parameter, for the UI to attach to its fields.
 func invalidMessage(e *proxmox.APIError) string {
-	msg := "Proxmox rejected the request: " + e.Reason
-	if len(e.Errors) == 0 {
-		return msg
-	}
+	msg := "Proxmox rejected the request (" + strings.TrimSuffix(e.Reason, ".") + ")"
 	keys := make([]string, 0, len(e.Errors))
 	for k := range e.Errors {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		parts[i] = k + ": " + strings.TrimSpace(e.Errors[k])
+	for _, k := range keys {
+		reason := strings.Join(strings.Fields(strings.ReplaceAll(e.Errors[k], ";", ",")), " ")
+		msg += "\n" + k + ": " + reason
 	}
-	return strings.TrimSuffix(msg, ".") + ". " + strings.Join(parts, "; ")
+	return msg
 }
 
 func unsupported(op string) error {

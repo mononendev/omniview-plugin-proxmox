@@ -4,6 +4,9 @@ import (
 	"github.com/omniviewdev/plugin-sdk/pkg/sdk"
 	"github.com/omniviewdev/plugin-sdk/settings"
 
+	pveexec "github.com/mononendev/omniview-plugin-proxmox/pkg/plugin/exec"
+	pvelogs "github.com/mononendev/omniview-plugin-proxmox/pkg/plugin/logs"
+	pvemetric "github.com/mononendev/omniview-plugin-proxmox/pkg/plugin/metric"
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/plugin/resource"
 )
 
@@ -28,5 +31,8 @@ func main() {
 	})
 
 	resource.Register(plugin)
+	pveexec.Register(plugin)
+	pvemetric.Register(plugin)
+	pvelogs.Register(plugin)
 	plugin.Serve()
 }

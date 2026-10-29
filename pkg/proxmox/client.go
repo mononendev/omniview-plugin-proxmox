@@ -83,9 +83,12 @@ type Client struct {
 	ClusterID string
 	base      *url.URL
 	auth      string
-	http      *http.Client
-	ceph      cephRoute
-	storage   guestStorageCache
+	// console holds the optional user login for console sessions, which
+	// PVE does not open for API tokens.
+	console consoleLogin
+	http    *http.Client
+	ceph    cephRoute
+	storage guestStorageCache
 }
 
 // NewClient builds a client for cluster. The token secret lives only in the
@@ -123,6 +126,7 @@ func NewClient(c Cluster) (*Client, error) {
 		ClusterID: c.ID,
 		base:      base,
 		auth:      "PVEAPIToken=" + c.TokenID + "=" + c.TokenSecret,
+		console:   consoleLoginFor(c),
 		http:      &http.Client{Transport: transport, Timeout: requestTimeout},
 	}, nil
 }
@@ -178,12 +182,39 @@ func (c *Client) del(ctx context.Context, path string, query url.Values, into an
 	return c.do(ctx, http.MethodDelete, path, query, nil, into)
 }
 
-// do sends one API request. form, when not nil, is the urlencoded body.
-// into, when not nil, receives the response's data, which must be present;
-// with a nil into the data is ignored (writes often answer null).
+// do sends one API request with the token. form, when not nil, is the
+// urlencoded body. into, when not nil, receives the response's data, which
+// must be present; with a nil into the data is ignored (writes often answer
+// null).
 func (c *Client) do(ctx context.Context, method, path string, query, form url.Values, into any) error {
+	return c.send(ctx, c.authorizeToken, method, path, query, form, into)
+}
+
+// endpoint returns the URL of an API path. Callers build paths from
+// url.PathEscape'd segments, so path is taken as escaped: setting it as
+// URL.Path would escape it again (a UPID's "!" would reach Proxmox as %21
+// inside the segment and name no task).
+func (c *Client) endpoint(path string) (url.URL, error) {
 	u := *c.base
-	u.Path = strings.TrimSuffix(u.Path, "/") + path
+	raw := strings.TrimSuffix(u.EscapedPath(), "/") + path
+	unescaped, err := url.PathUnescape(raw)
+	if err != nil {
+		return url.URL{}, fmt.Errorf("api path %q: %w", path, err)
+	}
+	u.Path, u.RawPath = unescaped, raw
+	return u, nil
+}
+
+func (c *Client) authorizeToken(req *http.Request) {
+	req.Header.Set("Authorization", c.auth)
+}
+
+// send is do with the request's credentials set by authorize.
+func (c *Client) send(ctx context.Context, authorize func(*http.Request), method, path string, query, form url.Values, into any) error {
+	u, err := c.endpoint(path)
+	if err != nil {
+		return err
+	}
 	u.RawQuery = query.Encode()
 
 	var body io.Reader
@@ -194,7 +225,7 @@ func (c *Client) do(ctx context.Context, method, path string, query, form url.Va
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", c.auth)
+	authorize(req)
 	req.Header.Set("Accept", "application/json")
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

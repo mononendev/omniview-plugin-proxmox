@@ -21,6 +21,9 @@ tags:
     - ceph
 capabilities:
     - resource
+    - exec
+    - metric
+    - log
     - ui
 theme:
     colors:
