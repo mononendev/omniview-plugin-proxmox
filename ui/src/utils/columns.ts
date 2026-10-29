@@ -225,6 +225,16 @@ export function formatBytes(bytes: number): string {
   return `${unit === 0 ? value : value.toFixed(1)} ${BYTE_UNITS[unit]}`;
 }
 
+/** `12d 4h`, `3h 20m`, `45m`; under a minute is `<1m`. */
+export function formatDuration(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return minutes > 0 ? `${minutes}m` : '<1m';
+}
+
 /** Numeric columns are right-aligned. */
 export function isNumeric(col: Column): boolean {
   return Boolean(col.bytes || col.ratio);

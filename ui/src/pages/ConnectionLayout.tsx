@@ -7,13 +7,14 @@ import {
   usePluginRouter,
   useResourceTypes,
 } from '@omniviewdev/runtime';
-import { LuChevronLeft, LuNetwork, LuPlug, LuUnplug } from 'react-icons/lu';
+import { LuChevronLeft, LuLayoutDashboard, LuNetwork, LuPlug, LuUnplug } from 'react-icons/lu';
 import { Outlet, useParams } from 'react-router-dom';
 
-import { CATEGORY_ORDER, PLUGIN_ID, resourcePath, topologyPath } from '../constants';
+import { CATEGORY_ORDER, PLUGIN_ID, overviewPath, resourcePath, topologyPath } from '../constants';
 import { useProxmoxConnection } from '../hooks/useProxmoxConnection';
 
-/** NavList key of the topology page; resource keys always contain `::`. */
+/** NavList keys of the connection's own pages, also their last path segment; resource keys always contain `::`. */
+const OVERVIEW_KEY = 'overview';
 const TOPOLOGY_KEY = 'topology';
 
 const rootStyle = { display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, overflow: 'hidden' } as const;
@@ -82,11 +83,8 @@ export default function ConnectionLayout() {
   }, [types.data]);
 
   const selectedMatch = /\/resources\/([^/]+)$/.exec(pluginPath);
-  const selectedKey = selectedMatch
-    ? decodeURIComponent(selectedMatch[1])
-    : pluginPath.endsWith('/topology')
-      ? TOPOLOGY_KEY
-      : undefined;
+  const pageMatch = /\/(overview|topology)$/.exec(pluginPath);
+  const selectedKey = selectedMatch ? decodeURIComponent(selectedMatch[1]) : pageMatch?.[1];
   const selectedKeys = useMemo(() => new Set(selectedKey ? [selectedKey] : []), [selectedKey]);
 
   return (
@@ -126,7 +124,8 @@ export default function ConnectionLayout() {
             selectedKeys={selectedKeys}
             onSelectedKeysChange={(keys) => {
               const [key] = keys;
-              if (key === TOPOLOGY_KEY) navigate(topologyPath(connectionId));
+              if (key === OVERVIEW_KEY) navigate(overviewPath(connectionId));
+              else if (key === TOPOLOGY_KEY) navigate(topologyPath(connectionId));
               else if (key !== undefined) navigate(resourcePath(connectionId, String(key)));
             }}
           >
@@ -134,6 +133,12 @@ export default function ConnectionLayout() {
               <NavList.Group>
                 <NavList.GroupHeader>Overview</NavList.GroupHeader>
                 <NavList.GroupItems>
+                  <NavList.Item itemKey={OVERVIEW_KEY} textValue="Summary">
+                    <NavList.ItemIcon>
+                      <LuLayoutDashboard size={16} />
+                    </NavList.ItemIcon>
+                    <NavList.ItemLabel>Summary</NavList.ItemLabel>
+                  </NavList.Item>
                   <NavList.Item itemKey={TOPOLOGY_KEY} textValue="Topology">
                     <NavList.ItemIcon>
                       <LuNetwork size={16} />

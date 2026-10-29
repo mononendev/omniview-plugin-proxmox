@@ -2,6 +2,8 @@ import type { ProxmoxObject } from './columns';
 
 export type Count = { up: number; total: number };
 
+export type Capacity = { used: number; total: number };
+
 export type ClusterSummary = {
   /** Nodes with `status == online` out of all nodes. */
   nodes: Count;
@@ -9,19 +11,28 @@ export type ClusterSummary = {
   virtualMachines: Count;
   /** Running LXC guests out of all non-template LXC guests. */
   containers: Count;
+  /** Busy and total CPU cores of online nodes. */
+  cores: Capacity;
+  /** Used and total memory of online nodes, in bytes. */
+  memoryBytes: Capacity;
   /** Share of online nodes' CPUs in use, 0–1; undefined without online nodes. */
   cpu?: number;
   /** Share of online nodes' memory in use, 0–1; undefined without online nodes. */
   memory?: number;
 };
 
-function num(value: unknown): number {
+/** A finite number field, or 0. */
+export function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 /** Templates cannot run, so counting them would make a healthy cluster look partly stopped. */
+export function isTemplate(guest: ProxmoxObject): boolean {
+  return num(guest.template) === 1;
+}
+
 function countGuests(guests: ProxmoxObject[]): Count {
-  const real = guests.filter((g) => num(g.template) !== 1);
+  const real = guests.filter((g) => !isTemplate(g));
   return { up: real.filter((g) => g.status === 'running').length, total: real.length };
 }
 
@@ -44,6 +55,8 @@ export function summarizeCluster(
     nodes: { up: online.length, total: nodes.length },
     virtualMachines: countGuests(virtualMachines),
     containers: countGuests(containers),
+    cores: { used: busy, total: cores },
+    memoryBytes: { used: usedMemory, total: maxMemory },
     cpu: cores > 0 ? busy / cores : undefined,
     memory: maxMemory > 0 ? usedMemory / maxMemory : undefined,
   };

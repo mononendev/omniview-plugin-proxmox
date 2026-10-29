@@ -1,0 +1,252 @@
+.Root {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.Center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.Header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.Title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ov-color-fg-default);
+}
+
+.Banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ov-color-success);
+  background-color: var(--ov-color-success-soft);
+  font-size: 0.8rem;
+}
+
+.Banner[data-severity='warning'] {
+  border-color: var(--ov-color-warning);
+  background-color: var(--ov-color-warning-soft);
+}
+
+.Banner[data-severity='danger'] {
+  border-color: var(--ov-color-danger);
+  background-color: var(--ov-color-danger-soft);
+}
+
+.Banner > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.Issues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.Grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.Columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+/* Capacity and workload cards. Clickable ones are buttons. */
+.Card {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ov-color-border-default);
+  background-color: var(--ov-color-bg-surface);
+  transition: border-color 0.15s;
+}
+
+button.Card {
+  cursor: pointer;
+}
+
+button.Card:hover {
+  border-color: var(--ov-color-border-strong);
+}
+
+button.Card:focus-visible,
+.Row:focus-visible {
+  outline: 2px solid var(--ov-color-brand-500);
+  outline-offset: 1px;
+}
+
+.CardLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ov-color-fg-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.CardValue {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ov-color-fg-default);
+  font-variant-numeric: tabular-nums;
+}
+
+.CardValue small {
+  margin-left: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ov-color-fg-muted);
+}
+
+.CardDetail {
+  font-size: 0.75rem;
+  color: var(--ov-color-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.CardDetail[data-alert='true'] {
+  color: var(--ov-color-danger);
+}
+
+.CardMeter {
+  margin: 4px 0 2px;
+}
+
+/* Titled list panels: nodes, storage, top guests. */
+.Panel {
+  min-width: 0;
+  border-radius: 6px;
+  border: 1px solid var(--ov-color-border-default);
+  background-color: var(--ov-color-bg-surface);
+}
+
+.PanelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ov-color-border-muted);
+}
+
+.PanelEmpty {
+  padding: 12px;
+}
+
+.Table {
+  display: grid;
+  padding: 4px;
+  column-gap: 12px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.Table[data-columns='nodes'] {
+  grid-template-columns: minmax(80px, 1.2fr) minmax(90px, 1fr) minmax(90px, 1fr) auto auto;
+}
+
+.Table[data-columns='storage'] {
+  grid-template-columns: minmax(100px, 1.3fr) minmax(90px, 1fr) auto;
+}
+
+.Table[data-columns='guests'] {
+  grid-template-columns: minmax(100px, 1.4fr) minmax(90px, 1fr) auto;
+}
+
+/* Rows are buttons: reset them first, then lay out heads and rows alike on the table's columns. */
+.Row {
+  all: unset;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ov-color-fg-default);
+}
+
+.Head,
+.Row {
+  box-sizing: border-box;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: 5px 8px;
+}
+
+.Head {
+  color: var(--ov-color-fg-subtle);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.Row:hover {
+  background-color: var(--ov-color-state-hover);
+}
+
+.Name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.Name > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.Muted {
+  color: var(--ov-color-fg-muted);
+}
+
+.Right {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.Usage {
+  display: grid;
+  grid-template-columns: 1fr 3em;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.Usage > span {
+  text-align: right;
+  color: var(--ov-color-fg-muted);
+}

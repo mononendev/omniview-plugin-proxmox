@@ -13,7 +13,7 @@ import type { IconType } from 'react-icons';
 import { LuBox, LuMonitor, LuServer, LuUnplug } from 'react-icons/lu';
 import { SiProxmox } from 'react-icons/si';
 
-import { PLUGIN_ID, RESOURCE_KEYS, connectionPath, resourcePath } from '../../constants';
+import { PLUGIN_ID, RESOURCE_KEYS, USAGE_ZONES, connectionPath, resourcePath } from '../../constants';
 import { useProxmoxConnection } from '../../hooks/useProxmoxConnection';
 import { summarizeCluster, type Count } from '../../utils/clusterSummary';
 import type { ProxmoxObject } from '../../utils/columns';
@@ -28,9 +28,6 @@ export const proxmoxHomepageCardMeta: HomepageCardMeta = {
 };
 
 const loadingStyle = { display: 'flex', justifyContent: 'center', padding: 24 } as const;
-
-/** Usage meter colours: green to 60 %, amber to 85 %, red above. */
-const USAGE_ZONES = { low: 60, high: 85, optimum: 0 } as const;
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (

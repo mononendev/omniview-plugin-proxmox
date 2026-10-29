@@ -7,8 +7,9 @@ import type { ProxmoxObject } from '../utils/columns';
 export type ClusterObject = { resourceKey: string; data: ProxmoxObject };
 
 /**
- * Every node, storage entry and guest of a connection, by Proxmox ID. Graph
- * nodes carry only IDs; this supplies names and status for drawing them.
+ * Every node, storage entry and guest of a connection: per kind, and by
+ * Proxmox ID. Graph nodes carry only IDs; `objects` supplies names and status
+ * for drawing them.
  */
 export function useClusterObjects(connectionId: string) {
   const opts = { pluginID: PLUGIN_ID, connectionID: connectionId, idAccessor: 'id' };
@@ -32,6 +33,9 @@ export function useClusterObjects(connectionId: string) {
   return {
     objects,
     nodes: (nodes.data?.result ?? []) as ProxmoxObject[],
+    storage: (storage.data?.result ?? []) as ProxmoxObject[],
+    virtualMachines: (vms.data?.result ?? []) as ProxmoxObject[],
+    containers: (containers.data?.result ?? []) as ProxmoxObject[],
     isLoading: nodes.isLoading || storage.isLoading || vms.isLoading || containers.isLoading,
     error: nodes.error ?? storage.error ?? vms.error ?? containers.error,
   };

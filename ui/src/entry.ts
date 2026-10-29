@@ -11,7 +11,8 @@ import { PLUGIN_ID } from './constants';
 import { proxmoxResourceIconSet } from './icons/resourceIcons';
 import ConnectionLayout from './pages/ConnectionLayout';
 import ConnectionsPage from './pages/ConnectionsPage';
-import ResourcePage, { ConnectionIndexRedirect } from './pages/ResourcePage';
+import OverviewPage, { ConnectionIndexRedirect } from './pages/OverviewPage';
+import ResourcePage from './pages/ResourcePage';
 import TopologyPage from './pages/TopologyPage';
 
 /** Seeds header search and Cmd/Ctrl-K with the connection being viewed. */
@@ -30,6 +31,7 @@ const routes: RouteObject[] = [
     handle: connectionSearchHandle,
     children: [
       { index: true, Component: ConnectionIndexRedirect },
+      { path: 'overview', Component: OverviewPage },
       { path: 'resources/:resourceKey', Component: ResourcePage },
       { path: 'topology', Component: TopologyPage },
     ],

@@ -84,12 +84,12 @@ Connections are loaded when the plugin starts, so restart Omniview (or, in a dev
 workspace, `omniview-dev plugin dev restart proxmox`) after adding or removing clusters. Edits to an
 existing entry apply on its next connect.
 
-Open **Proxmox VE** in the sidebar and click the cluster row; it connects and opens the virtual
-machine table. Connecting asks the cluster for `ceph status` once; the **Ceph** section appears
-only if that succeeds, so a cluster without Ceph shows none (Ceph installed later appears on the
-next connect). While connected the plugin issues four GET requests every 10 seconds, plus one per
-Ceph view opened since connecting, plus one guest config read per VM or container each minute (see
-[Relationships](#relationships)).
+Open **Proxmox VE** in the sidebar and click the cluster row; it connects and opens the cluster's
+[Summary](#summary-page). Connecting asks the cluster for `ceph status` once; the **Ceph** section
+appears only if that succeeds, so a cluster without Ceph shows none (Ceph installed later appears on
+the next connect). While connected the plugin issues four GET requests every 10 seconds, plus one
+per Ceph view opened since connecting (the Summary page counts as the Ceph Status view), plus one
+guest config read per VM or container each minute (see [Relationships](#relationships)).
 
 A failed connect shows one of these errors:
 
@@ -140,7 +140,8 @@ group states and client I/O. The JSON view keeps the full monitor and manager ma
 
 Proxmox has no change feed, so while a connection is open each kind is re-read every 10 seconds
 and changes are pushed to the UI as watch events. Cluster kinds are watched from connect; a Ceph
-kind from the first time its view is opened. An unreachable cluster shows as a watch error and
+kind from the first time its view is opened (Ceph status also from the first Summary page of a
+cluster with Ceph). An unreachable cluster shows as a watch error and
 recovers on the next successful poll.
 
 Table columns are defined in `ui/src/utils/columns.ts`. The resource transport has no RPC that
@@ -174,6 +175,24 @@ In the UI:
 - **Related** (resource drawer): a guest's node and storage, a node's guests and storage, a storage
   entry's node and guests.
 - **Storage** column in the virtual machine and container tables.
+
+## Summary page
+
+A connection opens on **Summary** (connection sidebar, above Topology), built from the same
+10-second poll as the tables:
+
+- **Health banner**: offline nodes, storage at 85 % full or more (red from 95 %), storage
+  unavailable on an online node, guests neither running nor stopped, failing Ceph health checks
+  (muted ones left out), and a failed last refresh. Green when there is nothing to report.
+- **Capacity**: CPU and memory of online nodes (CPU weighted by core count), with the vCPUs and
+  memory configured on running guests; storage summed over available storage, shared storage
+  counted once (storages on the same disk or Ceph pool each count, as in Proxmox's datacenter
+  summary); Ceph usage, health, OSDs, monitor quorum and client I/O, on clusters where connecting
+  found Ceph. The card is left out while Proxmox cannot reach Ceph.
+- **Workloads**: nodes online, and running, stopped and other VMs and containers; templates are
+  counted apart. Each card opens its table.
+- **Nodes** (CPU, memory, guests running/total, uptime), **Storage** (fullest first), and the five
+  running guests using the most CPU cores and the most memory. Rows open the resource drawer.
 
 ## Homepage card
 

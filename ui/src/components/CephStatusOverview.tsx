@@ -1,16 +1,14 @@
 import type { ReactNode } from 'react';
 import { DescriptionList, Meter, StatusDot, type StatusDotStatus, Text } from '@omniviewdev/base-ui';
 
+import { CEPH_USAGE_ZONES } from '../constants';
 import {
   type CephStatusSummary,
   type MonitorSummary,
   summarizeCephStatus,
 } from '../utils/cephStatus';
-import { type NativeObject, formatBytes, statusOf } from '../utils/columns';
+import { type NativeObject, formatBytes, formatDuration, statusOf } from '../utils/columns';
 import styles from './CephStatusOverview.module.css';
-
-/** Usage meter colours: green to 75 %, amber to Ceph's default nearfull ratio (85 %), red above. */
-const USAGE_ZONES = { low: 75, high: 85, optimum: 0 } as const;
 
 /** Health detail lines shown per check; OSD_DOWN and the like can list hundreds. */
 const MAX_DETAILS = 8;
@@ -19,15 +17,6 @@ const numberFormat = new Intl.NumberFormat();
 
 function percent(fraction: number): string {
   return `${(fraction * 100).toFixed(1)} %`;
-}
-
-function formatDuration(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
 }
 
 /** active+clean is healthy; PGs not serving I/O or with lost/damaged data are errors; anything else is in progress. */
@@ -105,7 +94,7 @@ function CapacitySection({ capacity }: { capacity: NonNullable<CephStatusSummary
   return (
     <Section title="Capacity">
       <div className={styles.Usage}>
-        <Meter size="sm" value={fraction * 100} {...USAGE_ZONES} aria-label={`Raw capacity used ${percent(fraction)}`} />
+        <Meter size="sm" value={fraction * 100} {...CEPH_USAGE_ZONES} aria-label={`Raw capacity used ${percent(fraction)}`} />
         <Text size="sm">
           {formatBytes(capacity.used)} of {formatBytes(capacity.total)} used ({percent(fraction)})
         </Text>
