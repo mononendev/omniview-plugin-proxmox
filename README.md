@@ -86,7 +86,8 @@ existing entry apply on its next connect.
 
 Open **Proxmox VE** in the sidebar and click the cluster row; it connects and opens the virtual
 machine table. While connected the plugin issues four GET requests every 10 seconds, plus one per
-Ceph view opened since connecting.
+Ceph view opened since connecting, plus one guest config read per VM or container each minute (see
+[Relationships](#relationships)).
 
 A failed connect shows one of these errors:
 
@@ -120,10 +121,11 @@ pveum user delete omniview@pve
 | `proxmox::v1::CephMetadataServer` | `GET /nodes/{node}/ceph/mds` |
 | `proxmox::v1::CephFilesystem` | `GET /nodes/{node}/ceph/fs` |
 
-Objects are the unmodified API entries. Cluster resources are identified by Proxmox's
-cluster-unique `id` (`node/pve1`, `qemu/100`, `storage/pve1/local`); nodes are not mapped onto
-namespaces. Ceph objects have no such `id` and are identified by their Ceph name: the cluster
-`fsid`, `pool_name`, or `name` (`osd.3`, monitor/manager/MDS IDs, file system name).
+Objects are the API entries, plus an `omniview` object on guests and storage (see
+[Relationships](#relationships)). Cluster resources are identified by Proxmox's cluster-unique `id`
+(`node/pve1`, `qemu/100`, `storage/pve1/local`); nodes are not mapped onto namespaces. Ceph objects
+have no such `id` and are identified by their Ceph name: the cluster `fsid`, `pool_name`, or `name`
+(`osd.3`, monitor/manager/MDS IDs, file system name).
 
 Ceph state is cluster-wide but Proxmox serves it only from nodes with Ceph installed. A Ceph
 request goes to the node that answered the previous one, falling back to every other online node
@@ -137,6 +139,35 @@ recovers on the next successful poll.
 
 Table columns are defined in `ui/src/utils/columns.ts`. The resource transport has no RPC that
 delivers a backend `ResourceDefinition` to the UI, so the backend registers none.
+
+## Relationships
+
+The plugin declares relationships for Omniview's resource graph, which the host builds from the
+watched objects:
+
+| From | Relationship | To | Source |
+| --- | --- | --- | --- |
+| VirtualMachine, Container | `runs_on` | Node | the entry's `node` |
+| VirtualMachine, Container | `uses` | Storage | volumes in the guest config |
+| Storage | `runs_on` | Node | the entry's `node` |
+
+Proxmox names nodes and storage by bare name, so the plugin writes the target IDs into
+`omniview.node` (`node/pve1`) and `omniview.storage` (`["storage/pve1/local-lvm"]`) and the
+declarations extract those fields. Storage usage comes from `GET /nodes/{node}/{qemu|lxc}/{vmid}/config`:
+disks, EFI/TPM state, CD-ROM images, LXC root and mount points and unused disks, on the storage
+entry of the guest's node. Pass-through devices and bind mounts have no storage. Storage content
+listings are not used: for a `PVEAuditor` token Proxmox filters guest disks out of them. Each
+guest config is re-read after a minute, or at once when the guest moves to another node; a config
+that cannot be read keeps its last result, and a guest never read has no `omniview.storage`.
+
+In the UI:
+
+- **Topology** (connection sidebar): one section per node with the guests running on it, its
+  storage, and which storage each guest uses. Each section is the node's upstream neighbourhood
+  (`GetSubgraph`, two hops) in the host graph and refreshes when the graph changes.
+- **Related** (resource drawer): a guest's node and storage, a node's guests and storage, a storage
+  entry's node and guests.
+- **Storage** column in the virtual machine and container tables.
 
 ## Homepage card
 

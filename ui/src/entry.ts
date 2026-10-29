@@ -12,6 +12,7 @@ import { proxmoxResourceIconSet } from './icons/resourceIcons';
 import ConnectionLayout from './pages/ConnectionLayout';
 import ConnectionsPage from './pages/ConnectionsPage';
 import ResourcePage, { ConnectionIndexRedirect } from './pages/ResourcePage';
+import TopologyPage from './pages/TopologyPage';
 
 /** Seeds header search and Cmd/Ctrl-K with the connection being viewed. */
 const connectionSearchHandle: SearchRouteHandleV1 = {
@@ -30,6 +31,7 @@ const routes: RouteObject[] = [
     children: [
       { index: true, Component: ConnectionIndexRedirect },
       { path: 'resources/:resourceKey', Component: ResourcePage },
+      { path: 'topology', Component: TopologyPage },
     ],
   },
 ];

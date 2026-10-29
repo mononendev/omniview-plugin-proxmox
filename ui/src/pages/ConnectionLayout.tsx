@@ -7,11 +7,14 @@ import {
   usePluginRouter,
   useResourceTypes,
 } from '@omniviewdev/runtime';
-import { LuChevronLeft, LuPlug, LuUnplug } from 'react-icons/lu';
+import { LuChevronLeft, LuNetwork, LuPlug, LuUnplug } from 'react-icons/lu';
 import { Outlet, useParams } from 'react-router-dom';
 
-import { CATEGORY_ORDER, PLUGIN_ID, resourcePath } from '../constants';
+import { CATEGORY_ORDER, PLUGIN_ID, resourcePath, topologyPath } from '../constants';
 import { useProxmoxConnection } from '../hooks/useProxmoxConnection';
+
+/** NavList key of the topology page; resource keys always contain `::`. */
+const TOPOLOGY_KEY = 'topology';
 
 const rootStyle = { display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0, overflow: 'hidden' } as const;
 const sideNavStyle = {
@@ -70,7 +73,11 @@ export default function ConnectionLayout() {
   }, [types.data]);
 
   const selectedMatch = /\/resources\/([^/]+)$/.exec(pluginPath);
-  const selectedKey = selectedMatch ? decodeURIComponent(selectedMatch[1]) : undefined;
+  const selectedKey = selectedMatch
+    ? decodeURIComponent(selectedMatch[1])
+    : pluginPath.endsWith('/topology')
+      ? TOPOLOGY_KEY
+      : undefined;
   const selectedKeys = useMemo(() => new Set(selectedKey ? [selectedKey] : []), [selectedKey]);
 
   return (
@@ -110,10 +117,22 @@ export default function ConnectionLayout() {
             selectedKeys={selectedKeys}
             onSelectedKeysChange={(keys) => {
               const [key] = keys;
-              if (key !== undefined) navigate(resourcePath(connectionId, String(key)));
+              if (key === TOPOLOGY_KEY) navigate(topologyPath(connectionId));
+              else if (key !== undefined) navigate(resourcePath(connectionId, String(key)));
             }}
           >
             <NavList.Viewport>
+              <NavList.Group>
+                <NavList.GroupHeader>Overview</NavList.GroupHeader>
+                <NavList.GroupItems>
+                  <NavList.Item itemKey={TOPOLOGY_KEY} textValue="Topology">
+                    <NavList.ItemIcon>
+                      <LuNetwork size={16} />
+                    </NavList.ItemIcon>
+                    <NavList.ItemLabel>Topology</NavList.ItemLabel>
+                  </NavList.Item>
+                </NavList.GroupItems>
+              </NavList.Group>
               {sections.map((section) => (
                 <NavList.Group key={section.category}>
                   <NavList.GroupHeader>{section.category}</NavList.GroupHeader>
