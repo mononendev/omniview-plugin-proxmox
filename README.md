@@ -41,6 +41,13 @@ pveum user token add omniview@pve omniview --privsep 0
 Objects are the unmodified API entries. Their ID is Proxmox's cluster-unique `id`
 (`node/pve1`, `qemu/100`, `storage/pve1/local`); nodes are not mapped onto namespaces.
 
+Proxmox has no change feed, so while a connection is open each kind is re-read every 10 seconds
+and changes are pushed to the UI as watch events. An unreachable cluster shows as a watch error
+and recovers on the next successful poll.
+
+Table columns are defined in `ui/src/utils/columns.ts`. The resource transport has no RPC that
+delivers a backend `ResourceDefinition` to the UI, so the backend registers none.
+
 ## Development
 
 ```sh

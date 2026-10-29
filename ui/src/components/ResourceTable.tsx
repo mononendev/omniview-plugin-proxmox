@@ -14,21 +14,17 @@ import {
   type SortableColumnDef,
 } from '@omniviewdev/base-ui';
 import { ResourceIcon, useResources, useRightDrawer, type DrawerComponent } from '@omniviewdev/runtime';
-import { ResourceClient } from '@omniviewdev/runtime/api';
-import { useQuery } from '@tanstack/react-query';
 import { LuBraces, LuCircleAlert, LuRefreshCw, LuSquareChartGantt } from 'react-icons/lu';
 
 import { PLUGIN_ID } from '../constants';
 import {
-  type ColumnDefinition,
+  type Column,
   type ProxmoxObject,
-  columnAlign,
   columnStatus,
-  columnValue,
+  columnsFor,
   displayName,
   formatValue,
   sortValue,
-  visibleColumns,
 } from '../utils/columns';
 import ResourceOverview from './ResourceOverview';
 
@@ -44,9 +40,8 @@ type Props = {
 };
 
 /**
- * Definition-driven table for one Proxmox resource kind. Columns, formatting
- * and status colours come from the backend's ResourceDefinition; rows are the
- * raw `/cluster/resources` entries keyed by their opaque Proxmox `id`.
+ * Table for one Proxmox resource kind. Rows are the raw `/cluster/resources`
+ * entries keyed by their opaque Proxmox `id`; columns come from columnsFor().
  */
 export default function ResourceTable({ connectionId, resourceKey, label }: Props) {
   const [filter, setFilter] = useState('');
@@ -57,14 +52,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
     resourceKey,
     idAccessor: 'id',
   });
-  const definition = useQuery({
-    queryKey: [PLUGIN_ID, 'resource_definition', resourceKey],
-    queryFn: () => ResourceClient.GetResourceDefinition(PLUGIN_ID, resourceKey),
-    retry: false,
-    staleTime: Infinity,
-  });
-
-  const columns = useMemo(() => visibleColumns(definition.data?.columnDefs), [definition.data]);
+  const columns = columnsFor(resourceKey);
   const rows = useMemo(() => {
     const all = (resources.data?.result ?? []) as ProxmoxObject[];
     const needle = filter.trim().toLowerCase();
@@ -72,21 +60,22 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
     return all.filter(
       (row) =>
         row.id.toLowerCase().includes(needle) ||
-        columns.some((col) => formatValue(columnValue(row, col), col).toLowerCase().includes(needle)),
+        columns.some((col) => formatValue(row[col.field], col).toLowerCase().includes(needle)),
     );
   }, [resources.data, filter, columns]);
 
-  const error = resources.error ?? definition.error;
-  const loading = resources.isLoading || definition.isLoading;
-
   let body;
-  if (error) {
+  if (resources.error) {
     body = (
       <div style={centerStyle}>
-        <EmptyState icon={<LuCircleAlert />} title={`Failed to load ${label.toLowerCase()}`} description={error.message} />
+        <EmptyState
+          icon={<LuCircleAlert />}
+          title={`Failed to load ${label.toLowerCase()}`}
+          description={resources.error.message}
+        />
       </div>
     );
-  } else if (loading) {
+  } else if (resources.isLoading) {
     body = (
       <div style={centerStyle}>
         <Spinner />
@@ -102,8 +91,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
       </div>
     );
   } else {
-    // Mounted once the definition has loaded so the default sort uses its first column,
-    // and kept mounted while filtering so the chosen sort survives an empty result.
+    // Kept mounted while filtering so the chosen sort survives an empty result.
     body = <SortedTable connectionId={connectionId} resourceKey={resourceKey} columns={columns} rows={rows} />;
   }
 
@@ -113,7 +101,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
         <Stack direction="row" align="center" spacing={2}>
           <ResourceIcon pluginId={PLUGIN_ID} resourceKey={resourceKey} size={18} />
           <Text weight="semibold">{label}</Text>
-          {!loading && !error && (
+          {!resources.isLoading && !resources.error && (
             <Text size="sm" tone="muted">
               {rows.length}
             </Text>
@@ -146,7 +134,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
 type SortedTableProps = {
   connectionId: string;
   resourceKey: string;
-  columns: ColumnDefinition[];
+  columns: Column[];
   rows: ProxmoxObject[];
 };
 
@@ -157,9 +145,9 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
   const sortColumns = useMemo<Array<SortableColumnDef<ProxmoxObject>>>(
     () =>
       columns.map((col) => ({
-        id: col.id,
+        id: col.field,
         header: col.header,
-        accessor: (row) => sortValue(columnValue(row, col)),
+        accessor: (row) => sortValue(row[col.field]),
       })),
     [columns],
   );
@@ -196,8 +184,8 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
         <Table.Head>
           <Table.Row>
             {columns.map((col) => (
-              <Table.HeaderCell key={col.id} align={columnAlign(col)} style={col.width ? { width: col.width } : undefined}>
-                <SortableHeader columnId={col.id} sort={sort} onSort={onSort}>
+              <Table.HeaderCell key={col.field} align={col.bytes ? 'right' : 'left'}>
+                <SortableHeader columnId={col.field} sort={sort} onSort={onSort}>
                   {col.header}
                 </SortableHeader>
               </Table.HeaderCell>
@@ -208,7 +196,7 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
           {sortedData.map((row) => (
             <Table.Row key={row.id} interactive selected={isOpen && row.id === selectedId} onClick={() => openResource(row)}>
               {columns.map((col) => (
-                <ResourceCell key={col.id} row={row} col={col} />
+                <ResourceCell key={col.field} row={row} col={col} />
               ))}
             </Table.Row>
           ))}
@@ -218,13 +206,12 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
   );
 }
 
-function ResourceCell({ row, col }: { row: ProxmoxObject; col: ColumnDefinition }) {
-  const value = columnValue(row, col);
+function ResourceCell({ row, col }: { row: ProxmoxObject; col: Column }) {
+  const value = row[col.field];
   const text = formatValue(value, col);
   const status = columnStatus(value, col);
-  const align = columnAlign(col);
   return (
-    <Table.Cell align={align} numeric={align === 'right'} truncate>
+    <Table.Cell align={col.bytes ? 'right' : 'left'} numeric={col.bytes} truncate>
       {status && text ? <StatusDot status={status} label={text} size="sm" /> : text}
     </Table.Cell>
   );

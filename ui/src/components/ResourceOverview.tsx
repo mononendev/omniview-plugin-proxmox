@@ -1,22 +1,22 @@
 import { DescriptionList, Stack, StatusDot, Text } from '@omniviewdev/base-ui';
 
-import { type ColumnDefinition, type ProxmoxObject, columnStatus, columnValue, formatValue } from '../utils/columns';
+import { type Column, type ProxmoxObject, columnStatus, formatValue } from '../utils/columns';
 
 const sectionTitleStyle = { margin: '4px 0' } as const;
 
 type Props = {
   data?: ProxmoxObject;
-  columns: ColumnDefinition[];
+  columns: Column[];
 };
 
 /**
- * Generic detail view: the backend's column definitions first (formatted the
- * same way as the table), then every other raw field of the Proxmox entry.
+ * Generic detail view: the kind's table columns first (formatted the same
+ * way as the table), then every other raw field of the Proxmox entry.
  */
 export default function ResourceOverview({ data, columns }: Props) {
   if (!data) return null;
 
-  const covered = new Set(columns.map((col) => col.accessor));
+  const covered = new Set(columns.map((col) => col.field));
   const otherFields = Object.keys(data)
     .filter((field) => !covered.has(field))
     .sort();
@@ -29,11 +29,11 @@ export default function ResourceOverview({ data, columns }: Props) {
         </Text>
         <DescriptionList layout="horizontal" size="sm">
           {columns.map((col) => {
-            const value = columnValue(data, col);
+            const value = data[col.field];
             const status = columnStatus(value, col);
             const text = formatValue(value, col);
             return (
-              <DescriptionList.Item key={col.id} label={col.header}>
+              <DescriptionList.Item key={col.field} label={col.header}>
                 {status ? <StatusDot status={status} label={text} size="sm" /> : text || '—'}
               </DescriptionList.Item>
             );
