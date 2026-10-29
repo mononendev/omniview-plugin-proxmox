@@ -1,0 +1,118 @@
+name: Publish Plugin
+
+# Publishes to the marketplace in the OMNIVIEW_API_URL repository variable.
+# The tag is the version: push v1.2.3 and 1.2.3 is what gets published.
+#
+# Runs on the homelab runners so it can talk to the marketplace API inside the
+# cluster instead of through the public hostname. The archives themselves are
+# still uploaded to the public storage hostname the API signs upload links for.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.2.0)'
+        required: true
+      dry-run:
+        description: 'Build and package only; do not publish'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  PLATFORMS: darwin_arm64 darwin_amd64 linux_amd64 linux_arm64 windows_amd64
+
+jobs:
+  publish:
+    runs-on: [homelab]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        env:
+          RAW: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+          OMNIVIEW_API_URL: ${{ vars.OMNIVIEW_API_URL }}
+        run: |
+          # Without api-url the publish action falls back to the upstream marketplace.
+          if [ -z "$OMNIVIEW_API_URL" ]; then
+            echo "::error::Repository variable OMNIVIEW_API_URL is not set"
+            exit 1
+          fi
+          version="${RAW#v}"
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$RAW' is not a semantic version"
+            exit 1
+          fi
+          # Fail before the build if the marketplace cannot be reached from this runner.
+          curl -fsS --retry 3 --max-time 15 "${OMNIVIEW_API_URL%/}/v1/health" > /dev/null
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "platforms=${PLATFORMS// /,}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      # The runner image is minimal.
+      - name: Ensure make
+        run: |
+          command -v make && exit 0
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends make
+
+      - name: Test
+        run: make init test
+
+      # Cross-compiles the backend for every platform; CGO is off, so no toolchains needed.
+      - name: Build and package
+        run: make package VERSION="${{ steps.version.outputs.value }}" PLATFORMS="$PLATFORMS"
+
+      # Cluster DNS drops the odd lookup and the publish action does not retry
+      # an upload, so resolve the storage host once, with retries, and pin it.
+      - name: Pin storage host
+        env:
+          STORAGE_HOST: ${{ vars.OMNIVIEW_STORAGE_HOST }}
+        run: |
+          [ -n "$STORAGE_HOST" ] || exit 0
+          for attempt in 1 2 3 4 5; do
+            ip=$(getent ahostsv4 "$STORAGE_HOST" | awk 'NR==1 {print $1}')
+            if [ -n "$ip" ]; then
+              echo "$ip $STORAGE_HOST" | sudo tee -a /etc/hosts
+              exit 0
+            fi
+            echo "lookup of $STORAGE_HOST failed (attempt $attempt), retrying"; sleep 5
+          done
+          exit 1
+
+      - name: Publish to marketplace
+        if: ${{ !inputs.dry-run }}
+        uses: omniviewdev/publish-plugin-action@v1
+        with:
+          api-key: ${{ secrets.OMNIVIEW_API_KEY }}
+          api-url: ${{ vars.OMNIVIEW_API_URL }}
+          publisher-slug: mononen
+          plugin-id: proxmox
+          version: ${{ steps.version.outputs.value }}
+          artifact-path: dist/
+          architectures: ${{ steps.version.outputs.platforms }}
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: dist/*.tar.gz

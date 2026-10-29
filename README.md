@@ -176,3 +176,14 @@ DEV="$(task --silent dev:cli:build)"
 (`$ROOT/workspaces/WORKSPACE/omniview-plugin-proxmox`, on the workspace's feature branch), not the
 source checkout. Each Go rebuild restarts the plugin and drops open connections; reconnect from
 the cluster page. See `omniview/docs/development-cli.md` for the workspace commands.
+
+## Releasing
+
+Push a `vX.Y.Z` tag. `.github/workflows/publish.yaml` runs on the `homelab` runners, tests,
+cross-compiles every platform, publishes `X.Y.Z` to the marketplace at the `OMNIVIEW_API_URL`
+repository variable as `mononen/proxmox`, and creates a GitHub release with the archives. The tag
+overrides the `version` in `plugin.yaml`.
+
+The workflow needs the `OMNIVIEW_API_URL` and `OMNIVIEW_STORAGE_HOST` repository variables and the
+`OMNIVIEW_API_KEY` secret. To build without publishing, run the workflow by hand with a version and
+`dry-run` checked.
