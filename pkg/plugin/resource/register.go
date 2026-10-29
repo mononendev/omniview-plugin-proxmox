@@ -97,8 +97,8 @@ func Register(plugin *sdk.Plugin) {
 	static := []sdkresource.ResourceRegistration[proxmox.Client]{
 		{Meta: metaNode, Resourcer: clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node")},
 		{Meta: metaStorage, Resourcer: clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage")},
-		{Meta: metaVM, Resourcer: clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu")},
-		{Meta: metaContainer, Resourcer: clusterKind(metaContainer, "container", proxmox.ResourceTypeVM, "lxc")},
+		{Meta: metaVM, Resourcer: guestKind(metaVM, "virtual machine", "qemu")},
+		{Meta: metaContainer, Resourcer: guestKind(metaContainer, "container", "lxc")},
 	}
 	staticMetas := make([]sdkresource.ResourceMeta, len(static))
 	for i, reg := range static {

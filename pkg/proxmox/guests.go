@@ -1,0 +1,130 @@
+package proxmox
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"slices"
+	"strings"
+)
+
+// GuestNotFoundError is a guest ID absent from /cluster/resources.
+type GuestNotFoundError struct {
+	ID string
+}
+
+func (e *GuestNotFoundError) Error() string {
+	return "guest " + e.ID + " not found in the cluster"
+}
+
+// GuestRef is a guest located at call time, for the write methods.
+type GuestRef struct {
+	// ID is the cluster resource ID, qemu/100 or lxc/200.
+	ID   string
+	Node string
+	// Name is the guest's name, empty when it has none.
+	Name string
+	// Raw is the /cluster/resources entry the guest was found in.
+	Raw json.RawMessage
+}
+
+// Label names the guest in messages: "web01 (qemu/100)", or the ID alone.
+func (g GuestRef) Label() string {
+	if g.Name == "" {
+		return g.ID
+	}
+	return g.Name + " (" + g.ID + ")"
+}
+
+// path returns the guest's API path, /nodes/{node}/{type}/{vmid}, plus suffix.
+func (g GuestRef) path(suffix string) string {
+	typ, vmid, _ := strings.Cut(g.ID, "/")
+	return "/nodes/" + url.PathEscape(g.Node) + "/" + url.PathEscape(typ) + "/" + url.PathEscape(vmid) + suffix
+}
+
+// FindGuest returns the guest with cluster resource ID id (qemu/100,
+// lxc/200) on the node it currently runs on, read from /cluster/resources so
+// a migrated guest is addressed at its new node. A missing guest is a
+// *GuestNotFoundError.
+func (c *Client) FindGuest(ctx context.Context, id string) (GuestRef, error) {
+	typ, vmid, ok := strings.Cut(id, "/")
+	if !ok || vmid == "" || (typ != "qemu" && typ != "lxc") {
+		return GuestRef{}, &GuestNotFoundError{ID: id}
+	}
+	all, err := c.ClusterResources(ctx, ResourceTypeVM)
+	if err != nil {
+		return GuestRef{}, err
+	}
+	for _, e := range all {
+		if e.ID != id {
+			continue
+		}
+		var head struct {
+			Node string `json:"node"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(e.Raw, &head); err != nil {
+			return GuestRef{}, fmt.Errorf("decode guest %s: %w", id, err)
+		}
+		if head.Node == "" {
+			return GuestRef{}, fmt.Errorf("guest %s has no node", id)
+		}
+		return GuestRef{ID: id, Node: head.Node, Name: head.Name, Raw: e.Raw}, nil
+	}
+	return GuestRef{}, &GuestNotFoundError{ID: id}
+}
+
+// GuestStatusAction runs POST .../status/{action} (start, shutdown, reboot,
+// stop, suspend, resume) and returns the task's UPID.
+func (c *Client) GuestStatusAction(ctx context.Context, g GuestRef, action string) (string, error) {
+	var upid string
+	if err := c.post(ctx, g.path("/status/"+url.PathEscape(action)), url.Values{}, &upid); err != nil {
+		return "", err
+	}
+	return upid, nil
+}
+
+// DeleteGuest destroys the guest with DELETE /nodes/{node}/{type}/{vmid},
+// removing it from backup jobs, replication and HA (purge) and destroying
+// its unreferenced disks too. It returns the task's UPID. Proxmox refuses
+// to destroy a running guest.
+func (c *Client) DeleteGuest(ctx context.Context, g GuestRef) (string, error) {
+	var upid string
+	query := url.Values{"purge": {"1"}, "destroy-unreferenced-disks": {"1"}}
+	if err := c.del(ctx, g.path(""), query, &upid); err != nil {
+		return "", err
+	}
+	return upid, nil
+}
+
+// GuestConfig returns the guest's configuration without its digest, and the
+// digest that identifies this version of it for UpdateGuestConfig.
+func (c *Client) GuestConfig(ctx context.Context, g GuestRef) (map[string]any, string, error) {
+	var config map[string]any
+	if err := c.get(ctx, g.path("/config"), nil, &config); err != nil {
+		return nil, "", err
+	}
+	digest, _ := config["digest"].(string)
+	delete(config, "digest")
+	return config, digest, nil
+}
+
+// UpdateGuestConfig sets the keys of set and deletes the keys in del with
+// PUT .../config. A non-empty digest makes Proxmox reject the change when
+// the config was modified since the digest was read.
+func (c *Client) UpdateGuestConfig(ctx context.Context, g GuestRef, set map[string]string, del []string, digest string) error {
+	form := url.Values{}
+	for k, v := range set {
+		form.Set(k, v)
+	}
+	if len(del) > 0 {
+		keys := slices.Clone(del)
+		slices.Sort(keys)
+		form.Set("delete", strings.Join(keys, ","))
+	}
+	if digest != "" {
+		form.Set("digest", digest)
+	}
+	return c.put(ctx, g.path("/config"), form, nil)
+}

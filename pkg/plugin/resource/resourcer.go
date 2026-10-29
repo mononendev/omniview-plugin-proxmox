@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 
 	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
 
@@ -156,8 +158,43 @@ func (r *listResourcer) ClassifyError(err error) error {
 	if errors.As(err, &opErr) {
 		return err
 	}
-	var cephErr *proxmox.CephUnavailableError
+	var (
+		cephErr     *proxmox.CephUnavailableError
+		writeErr    *writeError
+		apiErr      *proxmox.APIError
+		taskErr     *proxmox.TaskError
+		notFoundErr *proxmox.GuestNotFoundError
+	)
+	isWrite := errors.As(err, &writeErr)
 	switch {
+	case errors.As(err, &notFoundErr):
+		return &sdkresource.ResourceOperationError{
+			Err: err, Code: "NOT_FOUND", Title: "Not found",
+			Message: "No " + r.noun + " with ID " + notFoundErr.ID + " exists in this cluster.",
+		}
+	case isWrite && proxmox.IsStatus(err, http.StatusForbidden):
+		suggestion := "Grant the token PVEVMAdmin on /vms (or the guest's path)."
+		if writeErr.privilege == privAudit {
+			suggestion = "Grant the token PVEAuditor on /vms (or the guest's path)."
+		}
+		return &sdkresource.ResourceOperationError{
+			Err: err, Code: "FORBIDDEN", Title: "Forbidden",
+			Message:     "The Proxmox API token lacks the " + writeErr.privilege + " privilege needed to " + writeErr.what + ".",
+			Suggestions: []string{suggestion},
+		}
+	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest:
+		return &sdkresource.ResourceOperationError{
+			Err: err, Code: "INVALID", Title: "Rejected by Proxmox", Message: invalidMessage(apiErr),
+		}
+	case errors.As(err, &taskErr):
+		what := "The Proxmox task"
+		if isWrite {
+			what = "The task to " + writeErr.what
+		}
+		return &sdkresource.ResourceOperationError{
+			Err: err, Code: "TASK_FAILED", Title: "Task failed",
+			Message: what + " failed: " + taskErr.ExitStatus,
+		}
 	case proxmox.IsStatus(err, http.StatusUnauthorized):
 		return &sdkresource.ResourceOperationError{
 			Err: err, Code: "UNAUTHORIZED", Title: "Unauthorized",
@@ -182,6 +219,25 @@ func (r *listResourcer) ClassifyError(err error) error {
 			Err: err, Code: "PROVIDER_ERROR", Title: "Proxmox API error", Message: err.Error(),
 		}
 	}
+}
+
+// invalidMessage renders a 400 response: Proxmox's reason followed by its
+// per-parameter errors, sorted by parameter.
+func invalidMessage(e *proxmox.APIError) string {
+	msg := "Proxmox rejected the request: " + e.Reason
+	if len(e.Errors) == 0 {
+		return msg
+	}
+	keys := make([]string, 0, len(e.Errors))
+	for k := range e.Errors {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + ": " + strings.TrimSpace(e.Errors[k])
+	}
+	return strings.TrimSuffix(msg, ".") + ". " + strings.Join(parts, "; ")
 }
 
 func unsupported(op string) error {
