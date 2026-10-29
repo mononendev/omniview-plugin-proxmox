@@ -2,31 +2,102 @@
 
 Browse Proxmox VE clusters in Omniview: nodes, storage, QEMU virtual machines and LXC containers. Read-only for now.
 
-## Connections
+## Setup
 
-Each entry under `clusters:` in a config file becomes one connection. The default file is
-`~/.config/omniview-proxmox/clusters.yaml`; add more under the plugin's **Cluster config files** setting.
+The plugin talks to the Proxmox VE API with a read-only API token. One API endpoint serves the
+whole cluster: `/cluster/resources` on any node lists every node, guest and storage.
+
+### 1. Create a read-only token
+
+On any cluster node, as root:
+
+```sh
+pveum user add omniview@pve --comment "Omniview read-only"
+pveum acl modify / --users omniview@pve --roles PVEAuditor
+pveum user token add omniview@pve omniview --privsep 0 --comment "Omniview plugin"
+```
+
+The last command prints the token secret (`value`) once; copy it. `--privsep 0` gives the token
+the user's `PVEAuditor` rights. With privilege separation on, the token needs its own ACL:
+`pveum acl modify / --tokens 'omniview@pve!omniview' --roles PVEAuditor`.
+
+### 2. Pick a URL the certificate covers
+
+The plugin verifies TLS. The host in `url` must be a name or IP in the node's certificate:
+
+```sh
+echo | openssl s_client -connect NODE:8006 2>/dev/null | openssl x509 -noout -issuer -ext subjectAltName
+```
+
+| Certificate | Config |
+| --- | --- |
+| Publicly trusted (ACME / Let's Encrypt, e.g. a Tailscale `*.ts.net` cert) | `url` with a name from the certificate; no `ca_file` |
+| Proxmox default, issued by the cluster CA | `ca_file` pointing at a copy of `/etc/pve/pve-root-ca.pem` |
+| Neither works | `insecure_skip_verify: true` (last resort; disables verification) |
+
+### 3. Write the config file
+
+Each entry under `clusters:` becomes one connection. The default file is
+`~/.config/omniview-proxmox/clusters.yaml` on the machine running Omniview; list more files under
+the plugin's **Cluster config files** setting. A listed file that does not exist is skipped.
+
+```sh
+mkdir -p ~/.config/omniview-proxmox && chmod 700 ~/.config/omniview-proxmox
+touch ~/.config/omniview-proxmox/clusters.yaml && chmod 600 ~/.config/omniview-proxmox/clusters.yaml
+```
 
 ```yaml
 clusters:
   - id: homelab                     # stable connection ID, unique across all files
-    name: Homelab                   # optional display name
-    url: https://pve1.lan:8006      # server root, no /api2/json
+    name: Homelab                   # optional display name, defaults to id
+    url: https://pve1.example.ts.net:8006   # server root, no /api2/json
     token_id: omniview@pve!omniview
     token_secret: 00000000-0000-0000-0000-000000000000
-    ca_file: ~/.config/omniview-proxmox/homelab-ca.pem   # copy of /etc/pve/pve-root-ca.pem
-    # insecure_skip_verify: true    # last resort for self-signed certificates
+    # ca_file: ~/.config/omniview-proxmox/homelab-ca.pem   # copy of /etc/pve/pve-root-ca.pem
+    # insecure_skip_verify: true
 ```
 
-Keep the file private (`chmod 600`). The token secret is read from the file when a connection
-starts; it is never placed in connection data sent to the UI.
+Unknown keys, duplicate IDs and a `url` with a path are rejected. The token secret is read from the
+file each time a connection starts and is never sent to the UI.
 
-Create a read-only token on any cluster node:
+The endpoint is a single node: if it is down, the connection fails even when the rest of the
+cluster is up. For a fallback, add a second entry with its own `id` and another node's `url`.
+
+### 4. Check the token from the Omniview machine
+
+Keep the single quotes; `!` in double quotes triggers shell history expansion.
 
 ```sh
-pveum user add omniview@pve
-pveum acl modify / --users omniview@pve --roles PVEAuditor
-pveum user token add omniview@pve omniview --privsep 0
+curl -H 'Authorization: PVEAPIToken=omniview@pve!omniview=SECRET' \
+  https://pve1.example.ts.net:8006/api2/json/version
+```
+
+A JSON reply with `"version"` means the network path, certificate and token are good. Add
+`--cacert FILE` when using `ca_file`.
+
+### 5. Connect
+
+Connections are loaded when the plugin starts, so restart Omniview (or, in a development
+workspace, `omniview-dev plugin dev restart proxmox`) after adding or removing clusters. Edits to an
+existing entry apply on its next connect.
+
+Open **Proxmox VE** in the sidebar and click the cluster row; it connects and opens the virtual
+machine table. While connected the plugin issues four GET requests every 10 seconds.
+
+A failed connect shows one of these errors:
+
+| Error | Cause |
+| --- | --- |
+| Unauthorized | Wrong `token_id` or `token_secret`, or the token was removed |
+| Forbidden | The token lacks `PVEAuditor` on `/` (see privilege separation above) |
+| Certificate rejected | `url` host not in the certificate, or the issuer is not trusted; see step 2 |
+| Host not found / Timed out / Unavailable | The node is not reachable from the Omniview machine |
+
+### Revoking access
+
+```sh
+pveum user token remove omniview@pve omniview
+pveum user delete omniview@pve
 ```
 
 ## Resources
@@ -57,5 +128,21 @@ make build      # build/bin/plugin and ui/dist
 make package    # dist/proxmox-<os>_<arch>.tar.gz
 ```
 
-For live development, add this repository to an Omniview development workspace and link it with
-`omniview-dev plugin dev link`; see `omniview/docs/development-cli.md`.
+### Development workspace
+
+The plugin is developed in a named Omniview development workspace, which builds it, runs Vite
+for UI hot reload and rebuilds the Go backend on save. From the Omniview host checkout, with the
+collection at `$ROOT`:
+
+```sh
+DEV="$(task --silent dev:cli:build)"
+"$DEV" repository add proxmox --source "$ROOT/omniview-plugin-proxmox" \
+  --ref origin/main --directory omniview-plugin-proxmox --root "$ROOT"
+"$DEV" workspace edit WORKSPACE --root "$ROOT" --add-repo proxmox --add-plugin proxmox --apply
+"$DEV" plugin dev status proxmox --workspace "$ROOT/workspaces/WORKSPACE"
+```
+
+`--apply` rebuilds and restarts the whole workspace. Edit the workspace worktree
+(`$ROOT/workspaces/WORKSPACE/omniview-plugin-proxmox`, on the workspace's feature branch), not the
+source checkout. Each Go rebuild restarts the plugin and drops open connections; reconnect from
+the cluster page. See `omniview/docs/development-cli.md` for the workspace commands.
