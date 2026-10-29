@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  CodeBlock,
   EmptyState,
   IconButton,
   SearchInput,
@@ -13,24 +12,23 @@ import {
   useSortableTable,
   type SortableColumnDef,
 } from '@omniviewdev/base-ui';
-import { ResourceIcon, useResources, useRightDrawer, type DrawerComponent } from '@omniviewdev/runtime';
-import { LuBraces, LuCircleAlert, LuRefreshCw, LuSquareChartGantt } from 'react-icons/lu';
+import { ResourceIcon, useResources, useRightDrawer } from '@omniviewdev/runtime';
+import { LuCircleAlert, LuRefreshCw } from 'react-icons/lu';
 
 import { PLUGIN_ID } from '../constants';
+import { useOpenResource } from '../hooks/useOpenResource';
 import {
   type Column,
   type Kind,
   type NativeObject,
+  cellValue,
   columnStatus,
-  displayName,
-  fieldValue,
   formatValue,
   isNumeric,
   kindFor,
   objectId,
   sortValue,
 } from '../utils/columns';
-import ResourceOverview from './ResourceOverview';
 
 const rootStyle = { height: '100%', minHeight: 0, padding: 8 } as const;
 const toolbarStyle = { padding: '0 4px' } as const;
@@ -64,7 +62,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
     return all.filter(
       (row) =>
         objectId(row, kind).toLowerCase().includes(needle) ||
-        kind.columns.some((col) => formatValue(fieldValue(row, col.field), col).toLowerCase().includes(needle)),
+        kind.columns.some((col) => formatValue(cellValue(row, col), col).toLowerCase().includes(needle)),
     );
   }, [resources.data, filter, kind]);
 
@@ -143,7 +141,8 @@ type SortedTableProps = {
 };
 
 function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps) {
-  const { openDrawer, isOpen } = useRightDrawer();
+  const { isOpen } = useRightDrawer();
+  const open = useOpenResource(connectionId);
   const [selectedId, setSelectedId] = useState<string>();
   const { columns } = kind;
 
@@ -152,37 +151,15 @@ function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps
       columns.map((col) => ({
         id: col.field,
         header: col.header,
-        accessor: (row) => sortValue(fieldValue(row, col.field)),
+        accessor: (row) => sortValue(cellValue(row, col)),
       })),
     [columns],
   );
   const { sortedData, sort, onSort } = useSortableTable({ data: rows, columns: sortColumns });
 
   const openResource = (row: NativeObject) => {
-    const id = objectId(row, kind);
-    const name = displayName(row, kind);
-    setSelectedId(id);
-    const drawer: DrawerComponent<NativeObject> = {
-      title: name,
-      icon: <ResourceIcon pluginId={PLUGIN_ID} resourceKey={resourceKey} size={16} />,
-      views: [
-        {
-          title: 'Overview',
-          icon: <LuSquareChartGantt />,
-          component: (ctx) => <ResourceOverview data={ctx.data} columns={columns} />,
-        },
-        {
-          title: 'JSON',
-          icon: <LuBraces />,
-          component: (ctx) => <CodeBlock language="json" code={JSON.stringify(ctx.data, null, 2)} copyable wrap />,
-        },
-      ],
-      actions: [],
-    };
-    openDrawer(drawer, {
-      data: row,
-      resource: { id, name, key: resourceKey, connectionID: connectionId, pluginID: PLUGIN_ID },
-    });
+    setSelectedId(objectId(row, kind));
+    open(resourceKey, row);
   };
 
   return (
@@ -217,7 +194,7 @@ function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps
 }
 
 function ResourceCell({ row, col }: { row: NativeObject; col: Column }) {
-  const value = fieldValue(row, col.field);
+  const value = cellValue(row, col);
   const text = formatValue(value, col);
   const status = columnStatus(value, col);
   return (

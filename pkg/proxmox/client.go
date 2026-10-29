@@ -68,6 +68,7 @@ type Client struct {
 	auth      string
 	http      *http.Client
 	ceph      cephRoute
+	storage   guestStorageCache
 }
 
 // NewClient builds a client for cluster. The token secret lives only in the

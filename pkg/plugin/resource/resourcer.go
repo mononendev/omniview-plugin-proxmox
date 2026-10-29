@@ -16,28 +16,33 @@ type lister func(context.Context, *proxmox.Client) ([]proxmox.Entry, error)
 
 // listResourcer serves one read-only kind from a lister. Proxmox has no
 // cheaper per-object read for most kinds, so Get and Watch are built on the
-// full list. Objects are the unmodified native entries, identified by the
-// lister's ID: Proxmox's own cluster-unique `id` for /cluster/resources
-// kinds (qemu/100, node/pve1, storage/pve1/local), the Ceph name otherwise.
+// full list. Objects are the native entries, plus a refsField object on
+// guests and storage, identified by the lister's ID: Proxmox's own
+// cluster-unique `id` for /cluster/resources kinds (qemu/100, node/pve1,
+// storage/pve1/local), the Ceph name otherwise.
 type listResourcer struct {
 	// noun names one object in messages: "virtual machine", "Ceph pool".
 	noun   string
 	list   lister
 	policy sdkresource.SyncPolicy
+	// relationships are the edges the host graph extracts from the objects.
+	relationships []sdkresource.RelationshipDescriptor
 }
 
 var (
 	_ sdkresource.Resourcer[proxmox.Client] = (*listResourcer)(nil)
 	_ sdkresource.ErrorClassifier           = (*listResourcer)(nil)
 	_ sdkresource.SyncPolicyDeclarer        = (*listResourcer)(nil)
+	_ sdkresource.RelationshipDeclarer      = (*listResourcer)(nil)
 )
 
 // clusterKind serves the /cluster/resources entries of one type, watched
-// from connect.
+// from connect, with refsField added where the type declares relationships.
 func clusterKind(noun string, apiType proxmox.ResourceType, entryType string) *listResourcer {
 	return &listResourcer{
-		noun:   noun,
-		policy: sdkresource.SyncOnConnect,
+		noun:          noun,
+		policy:        sdkresource.SyncOnConnect,
+		relationships: relationshipsOf(entryType),
 		list: func(ctx context.Context, client *proxmox.Client) ([]proxmox.Entry, error) {
 			all, err := client.ClusterResources(ctx, apiType)
 			if err != nil {
@@ -48,6 +53,9 @@ func clusterKind(noun string, apiType proxmox.ResourceType, entryType string) *l
 				if e.Type == entryType {
 					out = append(out, e.Entry)
 				}
+			}
+			if err := addRefs(ctx, client, entryType, out); err != nil {
+				return nil, err
 			}
 			return out, nil
 		},

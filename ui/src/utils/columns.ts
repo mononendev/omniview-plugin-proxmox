@@ -1,6 +1,7 @@
 import type { StatusDotStatus } from '@omniviewdev/base-ui';
 
 import { RESOURCE_KEYS } from '../constants';
+import { parseStorageId, refsOf } from './refs';
 
 /** A native Proxmox API object, passed through unmodified by the backend. */
 export type NativeObject = Record<string, unknown>;
@@ -23,7 +24,17 @@ export type Column = {
   ratio?: boolean;
   /** Rendered as a status dot coloured by STATUS_BY_VALUE. */
   status?: boolean;
+  /** Derives the cell value instead of reading `field`, which stays the column ID. */
+  value?: (row: NativeObject) => unknown;
 };
+
+/** Storage a guest uses, by name; storage on another node than the guest's is shown with that node. */
+function guestStorage(row: NativeObject): string[] | undefined {
+  return refsOf(row).storage?.map((id) => {
+    const { node, storage } = parseStorageId(id);
+    return node === row.node ? storage : `${storage} (${node})`;
+  });
+}
 
 /** How one resource kind is shown. */
 export type Kind = {
@@ -44,6 +55,7 @@ const guestColumns: Column[] = [
   { field: 'mem', header: 'Memory', bytes: true },
   { field: 'maxmem', header: 'Max memory', bytes: true },
   { field: 'maxdisk', header: 'Disk', bytes: true },
+  { field: 'omniview.storage', header: 'Storage', value: guestStorage },
   { field: 'tags', header: 'Tags' },
 ];
 
@@ -177,6 +189,11 @@ export function fieldValue(data: NativeObject, field: string): unknown {
     value = (value as NativeObject)[part];
   }
   return value;
+}
+
+/** A column's cell value: derived, or read from its field. */
+export function cellValue(row: NativeObject, col: Column): unknown {
+  return col.value ? col.value(row) : fieldValue(row, col.field);
 }
 
 function present(value: unknown): boolean {
