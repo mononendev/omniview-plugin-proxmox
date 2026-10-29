@@ -5,13 +5,20 @@ export const RESOURCE_KEYS = {
   storage: 'proxmox::v1::Storage',
   virtualMachine: 'proxmox::v1::VirtualMachine',
   container: 'proxmox::v1::Container',
+  cephCluster: 'proxmox::v1::CephCluster',
+  cephPool: 'proxmox::v1::CephPool',
+  cephOSD: 'proxmox::v1::CephOSD',
+  cephMonitor: 'proxmox::v1::CephMonitor',
+  cephManager: 'proxmox::v1::CephManager',
+  cephMetadataServer: 'proxmox::v1::CephMetadataServer',
+  cephFilesystem: 'proxmox::v1::CephFilesystem',
 } as const;
 
 /** Resource opened when a connection page has no resource selected. */
 export const DEFAULT_RESOURCE_KEY = RESOURCE_KEYS.virtualMachine;
 
 /** Sidebar order for backend-supplied categories; unknown categories follow alphabetically. */
-export const CATEGORY_ORDER = ['Compute', 'Cluster'];
+export const CATEGORY_ORDER = ['Compute', 'Cluster', 'Ceph'];
 
 /** Plugin-relative path of a connection's page. */
 export function connectionPath(connectionId: string): string {

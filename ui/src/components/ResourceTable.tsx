@@ -19,11 +19,15 @@ import { LuBraces, LuCircleAlert, LuRefreshCw, LuSquareChartGantt } from 'react-
 import { PLUGIN_ID } from '../constants';
 import {
   type Column,
-  type ProxmoxObject,
+  type Kind,
+  type NativeObject,
   columnStatus,
-  columnsFor,
   displayName,
+  fieldValue,
   formatValue,
+  isNumeric,
+  kindFor,
+  objectId,
   sortValue,
 } from '../utils/columns';
 import ResourceOverview from './ResourceOverview';
@@ -40,29 +44,29 @@ type Props = {
 };
 
 /**
- * Table for one Proxmox resource kind. Rows are the raw `/cluster/resources`
- * entries keyed by their opaque Proxmox `id`; columns come from columnsFor().
+ * Table for one Proxmox resource kind. Rows are the raw native objects keyed
+ * by the kind's ID field; columns come from kindFor().
  */
 export default function ResourceTable({ connectionId, resourceKey, label }: Props) {
   const [filter, setFilter] = useState('');
+  const kind = kindFor(resourceKey);
 
   const { resources } = useResources({
     pluginID: PLUGIN_ID,
     connectionID: connectionId,
     resourceKey,
-    idAccessor: 'id',
+    idAccessor: kind.idField,
   });
-  const columns = columnsFor(resourceKey);
   const rows = useMemo(() => {
-    const all = (resources.data?.result ?? []) as ProxmoxObject[];
+    const all = (resources.data?.result ?? []) as NativeObject[];
     const needle = filter.trim().toLowerCase();
     if (!needle) return all;
     return all.filter(
       (row) =>
-        row.id.toLowerCase().includes(needle) ||
-        columns.some((col) => formatValue(row[col.field], col).toLowerCase().includes(needle)),
+        objectId(row, kind).toLowerCase().includes(needle) ||
+        kind.columns.some((col) => formatValue(fieldValue(row, col.field), col).toLowerCase().includes(needle)),
     );
-  }, [resources.data, filter, columns]);
+  }, [resources.data, filter, kind]);
 
   let body;
   if (resources.error) {
@@ -92,7 +96,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
     );
   } else {
     // Kept mounted while filtering so the chosen sort survives an empty result.
-    body = <SortedTable connectionId={connectionId} resourceKey={resourceKey} columns={columns} rows={rows} />;
+    body = <SortedTable connectionId={connectionId} resourceKey={resourceKey} kind={kind} rows={rows} />;
   }
 
   return (
@@ -134,29 +138,32 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
 type SortedTableProps = {
   connectionId: string;
   resourceKey: string;
-  columns: Column[];
-  rows: ProxmoxObject[];
+  kind: Kind;
+  rows: NativeObject[];
 };
 
-function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTableProps) {
+function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps) {
   const { openDrawer, isOpen } = useRightDrawer();
   const [selectedId, setSelectedId] = useState<string>();
+  const { columns } = kind;
 
-  const sortColumns = useMemo<Array<SortableColumnDef<ProxmoxObject>>>(
+  const sortColumns = useMemo<Array<SortableColumnDef<NativeObject>>>(
     () =>
       columns.map((col) => ({
         id: col.field,
         header: col.header,
-        accessor: (row) => sortValue(row[col.field]),
+        accessor: (row) => sortValue(fieldValue(row, col.field)),
       })),
     [columns],
   );
   const { sortedData, sort, onSort } = useSortableTable({ data: rows, columns: sortColumns });
 
-  const openResource = (row: ProxmoxObject) => {
-    setSelectedId(row.id);
-    const drawer: DrawerComponent<ProxmoxObject> = {
-      title: displayName(row),
+  const openResource = (row: NativeObject) => {
+    const id = objectId(row, kind);
+    const name = displayName(row, kind);
+    setSelectedId(id);
+    const drawer: DrawerComponent<NativeObject> = {
+      title: name,
       icon: <ResourceIcon pluginId={PLUGIN_ID} resourceKey={resourceKey} size={16} />,
       views: [
         {
@@ -174,7 +181,7 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
     };
     openDrawer(drawer, {
       data: row,
-      resource: { id: row.id, name: displayName(row), key: resourceKey, connectionID: connectionId, pluginID: PLUGIN_ID },
+      resource: { id, name, key: resourceKey, connectionID: connectionId, pluginID: PLUGIN_ID },
     });
   };
 
@@ -184,7 +191,7 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
         <Table.Head>
           <Table.Row>
             {columns.map((col) => (
-              <Table.HeaderCell key={col.field} align={col.bytes ? 'right' : 'left'}>
+              <Table.HeaderCell key={col.field} align={isNumeric(col) ? 'right' : 'left'}>
                 <SortableHeader columnId={col.field} sort={sort} onSort={onSort}>
                   {col.header}
                 </SortableHeader>
@@ -193,25 +200,28 @@ function SortedTable({ connectionId, resourceKey, columns, rows }: SortedTablePr
           </Table.Row>
         </Table.Head>
         <Table.Body>
-          {sortedData.map((row) => (
-            <Table.Row key={row.id} interactive selected={isOpen && row.id === selectedId} onClick={() => openResource(row)}>
-              {columns.map((col) => (
-                <ResourceCell key={col.field} row={row} col={col} />
-              ))}
-            </Table.Row>
-          ))}
+          {sortedData.map((row) => {
+            const id = objectId(row, kind);
+            return (
+              <Table.Row key={id} interactive selected={isOpen && id === selectedId} onClick={() => openResource(row)}>
+                {columns.map((col) => (
+                  <ResourceCell key={col.field} row={row} col={col} />
+                ))}
+              </Table.Row>
+            );
+          })}
         </Table.Body>
       </Table>
     </Table.Container>
   );
 }
 
-function ResourceCell({ row, col }: { row: ProxmoxObject; col: Column }) {
-  const value = row[col.field];
+function ResourceCell({ row, col }: { row: NativeObject; col: Column }) {
+  const value = fieldValue(row, col.field);
   const text = formatValue(value, col);
   const status = columnStatus(value, col);
   return (
-    <Table.Cell align={col.bytes ? 'right' : 'left'} numeric={col.bytes} truncate>
+    <Table.Cell align={isNumeric(col) ? 'right' : 'left'} numeric={isNumeric(col)} truncate>
       {status && text ? <StatusDot status={status} label={text} size="sm" /> : text}
     </Table.Cell>
   );

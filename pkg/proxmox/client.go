@@ -30,12 +30,17 @@ const (
 	ResourceTypeStorage ResourceType = "storage"
 )
 
-// ClusterResource is one /cluster/resources entry. Raw is the unmodified
-// native object; ID and Type are decoded from it for routing.
+// Entry is one native API object. Raw is the unmodified object; ID is the
+// field of it that identifies the object within its kind.
+type Entry struct {
+	ID  string
+	Raw json.RawMessage
+}
+
+// ClusterResource is one /cluster/resources entry; Type routes it to a kind.
 type ClusterResource struct {
-	ID   string
+	Entry
 	Type string
-	Raw  json.RawMessage
 }
 
 // Version is the GET /version payload.
@@ -62,6 +67,7 @@ type Client struct {
 	base      *url.URL
 	auth      string
 	http      *http.Client
+	ceph      cephRoute
 }
 
 // NewClient builds a client for cluster. The token secret lives only in the
@@ -130,7 +136,7 @@ func (c *Client) ClusterResources(ctx context.Context, typ ResourceType) ([]Clus
 		if err := json.Unmarshal(r, &head); err != nil {
 			return nil, fmt.Errorf("decode cluster resource: %w", err)
 		}
-		out = append(out, ClusterResource{ID: head.ID, Type: head.Type, Raw: r})
+		out = append(out, ClusterResource{Entry: Entry{ID: head.ID, Raw: r}, Type: head.Type})
 	}
 	return out, nil
 }

@@ -1,6 +1,18 @@
 import type { ComponentType } from 'react';
 import type { IconType } from 'react-icons';
-import { LuBox, LuHardDrive, LuMonitor, LuServer } from 'react-icons/lu';
+import {
+  LuBox,
+  LuCylinder,
+  LuDatabase,
+  LuEye,
+  LuFileStack,
+  LuFolderTree,
+  LuGauge,
+  LuHardDrive,
+  LuHeartPulse,
+  LuMonitor,
+  LuServer,
+} from 'react-icons/lu';
 import type { ResourceIconProps, ResourceIconSetV1 } from '@omniviewdev/runtime';
 
 import { RESOURCE_KEYS } from '../constants';
@@ -17,6 +29,13 @@ const icons: Record<string, ComponentType<ResourceIconProps>> = {
   [RESOURCE_KEYS.storage]: glyph(LuHardDrive),
   [RESOURCE_KEYS.virtualMachine]: glyph(LuMonitor),
   [RESOURCE_KEYS.container]: glyph(LuBox),
+  [RESOURCE_KEYS.cephCluster]: glyph(LuHeartPulse),
+  [RESOURCE_KEYS.cephPool]: glyph(LuDatabase),
+  [RESOURCE_KEYS.cephOSD]: glyph(LuCylinder),
+  [RESOURCE_KEYS.cephMonitor]: glyph(LuEye),
+  [RESOURCE_KEYS.cephManager]: glyph(LuGauge),
+  [RESOURCE_KEYS.cephMetadataServer]: glyph(LuFileStack),
+  [RESOURCE_KEYS.cephFilesystem]: glyph(LuFolderTree),
 };
 
 export const proxmoxResourceIconSet: ResourceIconSetV1 = {

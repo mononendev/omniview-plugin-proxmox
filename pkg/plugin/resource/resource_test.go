@@ -57,7 +57,7 @@ func TestGuestResourcersAreExactPerKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	vms := &clusterResourcer{apiType: proxmox.ResourceTypeVM, entryType: "qemu"}
+	vms := clusterKind("virtual machine", proxmox.ResourceTypeVM, "qemu")
 
 	list, err := vms.List(ctx, client, metaVM, sdkresource.ListInput{})
 	if err != nil {
@@ -74,5 +74,27 @@ func TestGuestResourcersAreExactPerKind(t *testing.T) {
 	var opErr *sdkresource.ResourceOperationError
 	if !errors.As(err, &opErr) || opErr.Code != "NOT_FOUND" {
 		t.Fatalf("VM Get must not resolve a container ID, got %v", err)
+	}
+}
+
+func TestCephKindOnClusterWithoutCephIsCephUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/cluster/resources" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"node/pve1","type":"node","node":"pve1","status":"online"}]}`))
+			return
+		}
+		http.Error(w, "binary not installed: /usr/bin/ceph-mon", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	client, err := proxmox.NewClient(proxmox.Cluster{ID: "c", URL: srv.URL, TokenID: "root@pam!t", TokenSecret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pools := cephKind("Ceph pool", (*proxmox.Client).CephPools)
+
+	_, err = pools.List(context.Background(), client, metaCephPool, sdkresource.ListInput{})
+	var opErr *sdkresource.ResourceOperationError
+	if !errors.As(pools.ClassifyError(err), &opErr) || opErr.Code != "CEPH_UNAVAILABLE" {
+		t.Fatalf("want CEPH_UNAVAILABLE, got %v", pools.ClassifyError(err))
 	}
 }
