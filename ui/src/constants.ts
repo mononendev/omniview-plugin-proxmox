@@ -22,6 +22,13 @@ export const GRAPH_RESOURCE_KEYS: ReadonlySet<string> = new Set([
   RESOURCE_KEYS.container,
 ]);
 
+/** Kinds the backend serves RRD metrics for. */
+export const METRIC_RESOURCE_KEYS: ReadonlySet<string> = new Set([
+  RESOURCE_KEYS.node,
+  RESOURCE_KEYS.virtualMachine,
+  RESOURCE_KEYS.container,
+]);
+
 /** Sidebar order for backend-supplied categories; unknown categories follow alphabetically. */
 export const CATEGORY_ORDER = ['Compute', 'Cluster', 'Ceph'];
 

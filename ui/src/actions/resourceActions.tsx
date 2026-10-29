@@ -1,0 +1,192 @@
+import type { DrawerComponentAction, DrawerContext } from '@omniviewdev/runtime';
+import {
+  LuCirclePause,
+  LuCirclePlay,
+  LuLogs,
+  LuPlay,
+  LuPower,
+  LuRotateCw,
+  LuSettings2,
+  LuSquare,
+  LuTerminal,
+  LuTrash2,
+} from 'react-icons/lu';
+
+import { PLUGIN_ID, RESOURCE_KEYS } from '../constants';
+import type { NativeObject } from '../utils/columns';
+import { type ActionTarget, actionDeps } from './actionDeps';
+
+type Ctx = DrawerContext<NativeObject>;
+type Action = DrawerComponentAction<NativeObject>;
+
+function targetOf(ctx: Ctx): ActionTarget {
+  const id = ctx.resource?.id ?? '';
+  return {
+    connectionID: ctx.resource?.connectionID ?? '',
+    resourceKey: ctx.resource?.key ?? '',
+    id,
+    name: ctx.resource?.name || id,
+    data: ctx.data ?? {},
+  };
+}
+
+const status = (ctx: Ctx) => String(ctx.data?.status ?? '');
+const isTemplate = (ctx: Ctx) => ctx.data?.template === 1 || ctx.data?.template === true;
+const isRunning = (ctx: Ctx) => status(ctx) === 'running' && !isTemplate(ctx);
+const isPaused = (ctx: Ctx) => status(ctx) === 'paused' || status(ctx) === 'suspended';
+
+/** Runs a lifecycle action. The runtime reports the result and any error. */
+function runLifecycle(ctx: Ctx, actionID: string, progress: string) {
+  const deps = actionDeps(ctx);
+  const target = targetOf(ctx);
+  deps.notify(`${progress} ${target.name}…`);
+  deps.executeAction({ actionID, id: target.id }).catch(() => undefined);
+}
+
+/** A lifecycle action that asks first, as the Proxmox web UI does. */
+function confirmLifecycle(ctx: Ctx, actionID: string, progress: string, question: string, consequence: string) {
+  const target = targetOf(ctx);
+  actionDeps(ctx).show({
+    title: (
+      <span>
+        {question} <strong>{target.name}</strong>?
+      </span>
+    ),
+    body: consequence,
+    confirmLabel: question,
+    cancelLabel: 'Cancel',
+    onConfirm: () => runLifecycle(ctx, actionID, progress),
+  });
+}
+
+/** Opens a terminal tab; Proxmox's termproxy gives a login shell, so no command is sent. */
+function openShell(ctx: Ctx, params: Record<string, string>) {
+  const target = targetOf(ctx);
+  void actionDeps(ctx).createExecSession({
+    connectionID: target.connectionID,
+    label: target.name,
+    icon: 'LuTerminal',
+    opts: {
+      resource_plugin: PLUGIN_ID,
+      resource_key: target.resourceKey,
+      resource_data: target.data,
+      params,
+      tty: true,
+    },
+  });
+}
+
+const viewLogs: Action = {
+  title: 'View logs',
+  icon: <LuLogs />,
+  action: (ctx) => {
+    const target = targetOf(ctx);
+    actionDeps(ctx)
+      .createLogSession({
+        connectionID: target.connectionID,
+        resourceKey: target.resourceKey,
+        resourceID: target.id,
+        resourceData: target.data,
+        label: `Logs ${target.name}`,
+        icon: 'LuLogs',
+      })
+      .catch(() => undefined);
+  },
+};
+
+function guestActions(qemu: boolean): Action[] {
+  const noun = qemu ? 'virtual machine' : 'container';
+  const actions: Action[] = [
+    {
+      title: 'Open shell',
+      icon: <LuTerminal />,
+      enabled: isRunning,
+      // VMs attach to a serial console; the guest needs a serial0 port.
+      action: (ctx) => openShell(ctx, qemu ? { serial: 'serial0' } : {}),
+    },
+    {
+      title: 'Edit config',
+      icon: <LuSettings2 />,
+      action: (ctx) => actionDeps(ctx).openEditConfig(targetOf(ctx)),
+    },
+    {
+      title: 'Start',
+      icon: <LuPlay />,
+      enabled: (ctx) => status(ctx) === 'stopped' && !isTemplate(ctx),
+      action: (ctx) => runLifecycle(ctx, 'start', 'Starting'),
+    },
+    {
+      title: 'Shutdown',
+      icon: <LuPower />,
+      enabled: isRunning,
+      action: (ctx) =>
+        confirmLifecycle(ctx, 'shutdown', 'Shutting down', 'Shut down', `Asks the guest OS to shut the ${noun} down.`),
+    },
+    {
+      title: 'Reboot',
+      icon: <LuRotateCw />,
+      enabled: isRunning,
+      action: (ctx) => confirmLifecycle(ctx, 'reboot', 'Rebooting', 'Reboot', `Asks the guest OS to restart the ${noun}.`),
+    },
+    {
+      title: 'Stop',
+      icon: <LuSquare />,
+      enabled: (ctx) => isRunning(ctx) || isPaused(ctx),
+      action: (ctx) =>
+        confirmLifecycle(
+          ctx,
+          'stop',
+          'Stopping',
+          'Stop',
+          `Stops the ${noun} immediately, like pulling the power plug. Unsaved data in the guest is lost.`,
+        ),
+    },
+  ];
+  if (qemu) {
+    actions.push(
+      {
+        title: 'Suspend',
+        icon: <LuCirclePause />,
+        enabled: isRunning,
+        action: (ctx) => runLifecycle(ctx, 'suspend', 'Suspending'),
+      },
+      {
+        title: 'Resume',
+        icon: <LuCirclePlay />,
+        enabled: isPaused,
+        action: (ctx) => runLifecycle(ctx, 'resume', 'Resuming'),
+      },
+    );
+  }
+  actions.push({
+    title: 'Delete',
+    icon: <LuTrash2 />,
+    // Proxmox refuses to destroy a running guest.
+    enabled: (ctx) => status(ctx) === 'stopped',
+    action: (ctx) => actionDeps(ctx).openDelete(targetOf(ctx)),
+  });
+  return actions;
+}
+
+const ACTIONS: Record<string, Action[]> = {
+  [RESOURCE_KEYS.virtualMachine]: guestActions(true),
+  [RESOURCE_KEYS.container]: guestActions(false),
+  [RESOURCE_KEYS.node]: [
+    {
+      title: 'Open shell',
+      icon: <LuTerminal />,
+      enabled: (ctx) => status(ctx) === 'online',
+      action: (ctx) => openShell(ctx, {}),
+    },
+    viewLogs,
+  ],
+  [RESOURCE_KEYS.cephOSD]: [viewLogs],
+  [RESOURCE_KEYS.cephMonitor]: [viewLogs],
+  [RESOURCE_KEYS.cephManager]: [viewLogs],
+  [RESOURCE_KEYS.cephMetadataServer]: [viewLogs],
+};
+
+/** Drawer header and row menu actions of a kind; handlers come from `actionDeps`. */
+export function resourceActions(resourceKey: string): Action[] {
+  return ACTIONS[resourceKey] ?? [];
+}

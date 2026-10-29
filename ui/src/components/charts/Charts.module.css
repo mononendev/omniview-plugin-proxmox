@@ -1,0 +1,173 @@
+.chartRoot {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+
+.svg {
+  display: block;
+  overflow: visible;
+}
+
+.axisLabel {
+  fill: var(--ov-color-fg-muted);
+  font-family: var(--ov-font-sans);
+  font-size: 10px;
+}
+
+.inlineAxisLabel {
+  fill: var(--ov-color-fg-muted);
+  font-family: var(--ov-font-sans);
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.gridLine {
+  stroke: var(--ov-color-border-muted);
+  stroke-width: 1;
+  opacity: 0.5;
+  shape-rendering: crispEdges;
+}
+
+.annotationLabel {
+  fill: var(--ov-color-fg-muted);
+  font-family: var(--ov-font-sans);
+  font-size: 10px;
+}
+
+.crosshair {
+  stroke: var(--ov-color-fg-subtle);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.hoverDot {
+  stroke: var(--ov-color-bg-surface);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.readout {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  pointer-events: none;
+  min-width: 120px;
+  max-width: 260px;
+  padding: 6px 8px;
+  border: 1px solid var(--ov-color-border-overlay);
+  border-radius: var(--ov-radius-sm);
+  background: var(--ov-color-bg-elevated);
+  box-shadow: var(--ov-shadow-surface);
+  color: var(--ov-color-fg-default);
+  font-family: var(--ov-font-sans);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.readoutTime {
+  color: var(--ov-color-fg-muted);
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.readoutRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.readoutLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ov-color-fg-muted);
+}
+
+.readoutValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  color: var(--ov-color-fg-muted);
+}
+
+/* MetricsPanel */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.panelDefault {
+  background: var(--ov-color-bg-surface);
+  border: 1px solid var(--ov-color-border-default);
+  border-radius: 8px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  min-height: 32px;
+}
+
+.panelIcon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--ov-color-fg-muted);
+}
+
+.panelTitles {
+  flex: 1;
+  min-width: 0;
+}
+
+.panelTitle {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ov-color-fg-default);
+}
+
+.panelSubtitle {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--ov-color-fg-muted);
+}
+
+.panelControls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}

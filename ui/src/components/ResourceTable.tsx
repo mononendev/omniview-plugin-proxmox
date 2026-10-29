@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ContextMenu,
   EmptyState,
   IconButton,
   SearchInput,
@@ -12,17 +13,22 @@ import {
   useSortableTable,
   type SortableColumnDef,
 } from '@omniviewdev/base-ui';
-import { ResourceIcon, useResources, useRightDrawer } from '@omniviewdev/runtime';
+import { type DrawerContext, ResourceIcon, useResources, useRightDrawer } from '@omniviewdev/runtime';
 import { LuCircleAlert, LuRefreshCw } from 'react-icons/lu';
 
+import { bindActionDeps } from '../actions/actionDeps';
+import { resourceActions } from '../actions/resourceActions';
+import { useActionExecution } from '../actions/useActionExecution';
 import { PLUGIN_ID } from '../constants';
 import { useOpenResource } from '../hooks/useOpenResource';
+import { RowActionsButton, RowContextMenuPopup, menuEntries } from './RowActions';
 import {
   type Column,
   type Kind,
   type NativeObject,
   cellValue,
   columnStatus,
+  displayName,
   formatValue,
   isNumeric,
   kindFor,
@@ -34,6 +40,8 @@ const rootStyle = { height: '100%', minHeight: 0, padding: 8 } as const;
 const toolbarStyle = { padding: '0 4px' } as const;
 const tableContainerStyle = { flex: 1, minHeight: 0, overflow: 'auto' } as const;
 const centerStyle = { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' } as const;
+const actionsCellStyle = { width: 36, paddingBlock: 0 } as const;
+const rowGroupStyle = { display: 'table-row-group' } as const;
 
 type Props = {
   connectionId: string;
@@ -144,7 +152,10 @@ function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps
   const { isOpen } = useRightDrawer();
   const open = useOpenResource(connectionId);
   const [selectedId, setSelectedId] = useState<string>();
+  const [menuRowId, setMenuRowId] = useState<string>();
   const { columns } = kind;
+  const actions = resourceActions(resourceKey);
+  const { deps, dialogs } = useActionExecution({ connectionID: connectionId, resourceKey });
 
   const sortColumns = useMemo<Array<SortableColumnDef<NativeObject>>>(
     () =>
@@ -157,10 +168,49 @@ function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps
   );
   const { sortedData, sort, onSort } = useSortableTable({ data: rows, columns: sortColumns });
 
+  // Row menus run the drawer's actions against a context bound to this table's handlers.
+  const contexts = useMemo(() => {
+    const byId = new Map<string, DrawerContext<NativeObject>>();
+    for (const row of rows) {
+      const id = objectId(row, kind);
+      const ctx = {
+        data: row,
+        resource: { id, name: displayName(row, kind), key: resourceKey, connectionID: connectionId, pluginID: PLUGIN_ID },
+      };
+      byId.set(id, bindActionDeps(ctx, deps));
+    }
+    return byId;
+  }, [rows, kind, resourceKey, connectionId, deps]);
+
   const openResource = (row: NativeObject) => {
     setSelectedId(objectId(row, kind));
     open(resourceKey, row);
   };
+
+  const hasActions = actions.length > 0;
+  const tableRows = sortedData.map((row) => {
+    const id = objectId(row, kind);
+    const ctx = contexts.get(id);
+    return (
+      <Table.Row
+        key={id}
+        interactive
+        selected={isOpen && id === selectedId}
+        onClick={() => openResource(row)}
+        onContextMenu={hasActions ? () => setMenuRowId(id) : undefined}
+      >
+        {columns.map((col) => (
+          <ResourceCell key={col.field} row={row} col={col} />
+        ))}
+        {hasActions && (
+          <Table.Cell align="right" style={actionsCellStyle}>
+            {ctx && <RowActionsButton entries={menuEntries(actions, ctx)} />}
+          </Table.Cell>
+        )}
+      </Table.Row>
+    );
+  });
+  const menuCtx = menuRowId === undefined ? undefined : contexts.get(menuRowId);
 
   return (
     <Table.Container style={tableContainerStyle}>
@@ -174,21 +224,22 @@ function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps
                 </SortableHeader>
               </Table.HeaderCell>
             ))}
+            {hasActions && <Table.HeaderCell style={actionsCellStyle} aria-label="Actions" />}
           </Table.Row>
         </Table.Head>
-        <Table.Body>
-          {sortedData.map((row) => {
-            const id = objectId(row, kind);
-            return (
-              <Table.Row key={id} interactive selected={isOpen && id === selectedId} onClick={() => openResource(row)}>
-                {columns.map((col) => (
-                  <ResourceCell key={col.field} row={row} col={col} />
-                ))}
-              </Table.Row>
-            );
-          })}
-        </Table.Body>
+        {hasActions ? (
+          <ContextMenu.Root>
+            {/* The trigger's own class makes it a block; keep the tbody a row group. */}
+            <ContextMenu.Trigger render={<Table.Body />} style={rowGroupStyle}>
+              {tableRows}
+            </ContextMenu.Trigger>
+            <RowContextMenuPopup entries={menuCtx ? menuEntries(actions, menuCtx) : []} />
+          </ContextMenu.Root>
+        ) : (
+          <Table.Body>{tableRows}</Table.Body>
+        )}
       </Table>
+      {dialogs}
     </Table.Container>
   );
 }
