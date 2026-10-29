@@ -99,15 +99,18 @@ func TestCephKindOnClusterWithoutCephIsCephUnavailable(t *testing.T) {
 	}
 }
 
-func TestCephDiscoveryOffersCephKindsOnlyWhereCephAnswers(t *testing.T) {
-	metas := []sdkresource.ResourceMeta{metaCephCluster, metaCephPool}
+// The SDK skips the connect-time watch of every static kind missing from a
+// non-empty discovered set, so discovery must always list them; otherwise a
+// Ceph cluster gets no Node/Storage/guest watches and an empty graph.
+func TestDiscoveryKeepsStaticKindsAndAddsCephOnlyWhereCephAnswers(t *testing.T) {
+	static := []sdkresource.ResourceMeta{metaNode, metaStorage, metaVM, metaContainer}
+	ceph := []sdkresource.ResourceMeta{metaCephCluster, metaCephPool}
 	for _, tc := range []struct {
 		name string
 		ceph bool
-		want int
 	}{
-		{name: "no ceph", ceph: false, want: 0},
-		{name: "ceph", ceph: true, want: len(metas)},
+		{name: "no ceph", ceph: false},
+		{name: "ceph", ceph: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,12 +129,23 @@ func TestCephDiscoveryOffersCephKindsOnlyWhereCephAnswers(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			got, err := (&cephDiscovery{metas: metas}).discover(context.Background(), client)
+			got, err := (&cephDiscovery{static: static, ceph: ceph}).discover(context.Background(), client)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != tc.want {
-				t.Fatalf("got %d Ceph kinds, want %d", len(got), tc.want)
+			keys := map[string]bool{}
+			for _, m := range got {
+				keys[m.Key()] = true
+			}
+			for _, m := range static {
+				if !keys[m.Key()] {
+					t.Errorf("static kind %s missing from discovery: its watch would be skipped", m.Key())
+				}
+			}
+			for _, m := range ceph {
+				if keys[m.Key()] != tc.ceph {
+					t.Errorf("Ceph kind %s discovered=%v, want %v", m.Key(), keys[m.Key()], tc.ceph)
+				}
 			}
 		})
 	}

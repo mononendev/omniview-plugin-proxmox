@@ -75,7 +75,8 @@ var (
 // The Ceph kinds are not static registrations: cephDiscovery adds their types
 // to a connection only when its cluster answers `ceph status`, so a cluster
 // without Ceph has no Ceph section. Exact-key Patterns route them to their
-// resourcers.
+// resourcers. Discovery lists the static kinds as well, or the SDK would not
+// watch them.
 func Register(plugin *sdk.Plugin) {
 	ceph := []sdkresource.ResourceRegistration[proxmox.Client]{
 		{Meta: metaCephCluster, Resourcer: cephKind(metaCephCluster, "Ceph cluster", (*proxmox.Client).CephStatus)},
@@ -93,22 +94,28 @@ func Register(plugin *sdk.Plugin) {
 		cephMetas[i] = reg.Meta
 	}
 
+	static := []sdkresource.ResourceRegistration[proxmox.Client]{
+		{Meta: metaNode, Resourcer: clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node")},
+		{Meta: metaStorage, Resourcer: clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage")},
+		{Meta: metaVM, Resourcer: clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu")},
+		{Meta: metaContainer, Resourcer: clusterKind(metaContainer, "container", proxmox.ResourceTypeVM, "lxc")},
+	}
+	staticMetas := make([]sdkresource.ResourceMeta, len(static))
+	for i, reg := range static {
+		staticMetas[i] = reg.Meta
+	}
+
 	cfg := sdkresource.ResourcePluginConfig[proxmox.Client]{
 		Connections: &connectionProvider{},
-		Resources: []sdkresource.ResourceRegistration[proxmox.Client]{
-			{Meta: metaNode, Resourcer: clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node")},
-			{Meta: metaStorage, Resourcer: clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage")},
-			{Meta: metaVM, Resourcer: clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu")},
-			{Meta: metaContainer, Resourcer: clusterKind(metaContainer, "container", proxmox.ResourceTypeVM, "lxc")},
-		},
-		Patterns:  cephPatterns,
-		Discovery: &cephDiscovery{metas: cephMetas},
+		Resources:   static,
+		Patterns:    cephPatterns,
+		Discovery:   &cephDiscovery{static: staticMetas, ceph: cephMetas},
 		Groups: []sdkresource.ResourceGroup{{
 			ID:          group,
 			Name:        "Proxmox VE",
 			Description: "Proxmox VE cluster resources",
 			Resources: map[string][]sdkresource.ResourceMeta{
-				version: {metaNode, metaStorage, metaVM, metaContainer},
+				version: staticMetas,
 			},
 		}},
 	}
