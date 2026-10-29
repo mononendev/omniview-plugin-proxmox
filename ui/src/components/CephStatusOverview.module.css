@@ -1,0 +1,100 @@
+.Root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.Section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.SectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--ov-color-border-default);
+}
+
+.Status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.Checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.Check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ov-color-border-default);
+  background-color: var(--ov-color-bg-surface);
+}
+
+.Check[data-muted] {
+  opacity: 0.6;
+}
+
+.CheckBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.Details {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: var(--ov-color-fg-muted);
+  font-size: var(--ov-font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.Usage {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.PgStates {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.PgStates > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.Code,
+.PgState {
+  font-family: var(--ov-font-mono);
+  font-size: var(--ov-font-size-xs);
+}
+
+.PgCount {
+  font-variant-numeric: tabular-nums;
+}

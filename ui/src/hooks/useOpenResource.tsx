@@ -3,9 +3,10 @@ import { CodeBlock } from '@omniviewdev/base-ui';
 import { ResourceIcon, useRightDrawer, type DrawerComponent } from '@omniviewdev/runtime';
 import { LuBraces, LuSquareChartGantt, LuWaypoints } from 'react-icons/lu';
 
+import CephStatusOverview from '../components/CephStatusOverview';
 import RelatedResources from '../components/RelatedResources';
 import ResourceOverview from '../components/ResourceOverview';
-import { GRAPH_RESOURCE_KEYS, PLUGIN_ID } from '../constants';
+import { GRAPH_RESOURCE_KEYS, PLUGIN_ID, RESOURCE_KEYS } from '../constants';
 import { type NativeObject, displayName, kindFor, objectId } from '../utils/columns';
 
 /**
@@ -24,7 +25,12 @@ export function useOpenResource(connectionId: string) {
         {
           title: 'Overview',
           icon: <LuSquareChartGantt />,
-          component: (ctx) => <ResourceOverview data={ctx.data} columns={kind.columns} />,
+          component: (ctx) =>
+            resourceKey === RESOURCE_KEYS.cephCluster ? (
+              <CephStatusOverview data={ctx.data} />
+            ) : (
+              <ResourceOverview data={ctx.data} columns={kind.columns} />
+            ),
         },
       ];
       if (GRAPH_RESOURCE_KEYS.has(resourceKey)) {

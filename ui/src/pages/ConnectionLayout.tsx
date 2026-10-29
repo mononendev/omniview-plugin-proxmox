@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { IconButton, NavList, Spinner, Stack, StatusDot, Text } from '@omniviewdev/base-ui';
 import {
   ResourceIcon,
@@ -57,6 +57,15 @@ export default function ConnectionLayout() {
   const name = connection.data?.name || connectionId;
   const isConnected = entries.some((e) => e.pluginID === PLUGIN_ID && e.connectionID === connectionId);
   const { pending, connect, disconnect } = useProxmoxConnection(connectionId, name, isConnected);
+
+  // Connecting runs the backend's Ceph discovery, which adds the Ceph kinds
+  // to clusters that run Ceph: reload the kinds once connected.
+  const refetchTypes = types.refetch;
+  const wasConnected = useRef(isConnected);
+  useEffect(() => {
+    if (isConnected && !wasConnected.current) void refetchTypes();
+    wasConnected.current = isConnected;
+  }, [isConnected, refetchTypes]);
 
   const sections = useMemo<NavSection[]>(() => {
     const byCategory = new Map<string, NavItem[]>();

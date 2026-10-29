@@ -88,7 +88,12 @@ func (p *connectionProvider) CreateClient(ctx context.Context) (*proxmox.Client,
 	if session == nil || session.Connection == nil {
 		return nil, errors.New("no connection in context")
 	}
-	conn := session.Connection
+	return newClient(session.Connection)
+}
+
+// newClient builds a client for conn, reading its token secret from the
+// connection's config file.
+func newClient(conn *types.Connection) (*proxmox.Client, error) {
 	file, _ := conn.Data[dataConfigFile].(string)
 	if file == "" {
 		return nil, fmt.Errorf("connection %q has no %s", conn.ID, dataConfigFile)

@@ -57,7 +57,7 @@ func TestGuestResourcersAreExactPerKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	vms := clusterKind("virtual machine", proxmox.ResourceTypeVM, "qemu")
+	vms := clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu")
 
 	list, err := vms.List(ctx, client, metaVM, sdkresource.ListInput{})
 	if err != nil {
@@ -90,11 +90,49 @@ func TestCephKindOnClusterWithoutCephIsCephUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pools := cephKind("Ceph pool", (*proxmox.Client).CephPools)
+	pools := cephKind(metaCephPool, "Ceph pool", (*proxmox.Client).CephPools)
 
 	_, err = pools.List(context.Background(), client, metaCephPool, sdkresource.ListInput{})
 	var opErr *sdkresource.ResourceOperationError
 	if !errors.As(pools.ClassifyError(err), &opErr) || opErr.Code != "CEPH_UNAVAILABLE" {
 		t.Fatalf("want CEPH_UNAVAILABLE, got %v", pools.ClassifyError(err))
+	}
+}
+
+func TestCephDiscoveryOffersCephKindsOnlyWhereCephAnswers(t *testing.T) {
+	metas := []sdkresource.ResourceMeta{metaCephCluster, metaCephPool}
+	for _, tc := range []struct {
+		name string
+		ceph bool
+		want int
+	}{
+		{name: "no ceph", ceph: false, want: 0},
+		{name: "ceph", ceph: true, want: len(metas)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api2/json/cluster/resources":
+					_, _ = w.Write([]byte(`{"data":[{"id":"node/pve1","type":"node","node":"pve1","status":"online"}]}`))
+				case tc.ceph && r.URL.Path == "/api2/json/nodes/pve1/ceph/status":
+					_, _ = w.Write([]byte(`{"data":{"fsid":"f1","health":{"status":"HEALTH_OK"}}}`))
+				default:
+					http.Error(w, "binary not installed: /usr/bin/ceph-mon", http.StatusInternalServerError)
+				}
+			}))
+			defer srv.Close()
+			client, err := proxmox.NewClient(proxmox.Cluster{ID: "c", URL: srv.URL, TokenID: "root@pam!t", TokenSecret: "s"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := (&cephDiscovery{metas: metas}).discover(context.Background(), client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != tc.want {
+				t.Fatalf("got %d Ceph kinds, want %d", len(got), tc.want)
+			}
+		})
 	}
 }

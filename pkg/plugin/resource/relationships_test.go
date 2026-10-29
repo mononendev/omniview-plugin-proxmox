@@ -53,10 +53,10 @@ func TestDeclaredEdgesResolveToListedResources(t *testing.T) {
 	}
 
 	kinds := map[string]*listResourcer{
-		metaNode.Key():      clusterKind("node", proxmox.ResourceTypeNode, "node"),
-		metaStorage.Key():   clusterKind("storage", proxmox.ResourceTypeStorage, "storage"),
-		metaVM.Key():        clusterKind("virtual machine", proxmox.ResourceTypeVM, "qemu"),
-		metaContainer.Key(): clusterKind("container", proxmox.ResourceTypeVM, "lxc"),
+		metaNode.Key():      clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node"),
+		metaStorage.Key():   clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage"),
+		metaVM.Key():        clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu"),
+		metaContainer.Key(): clusterKind(metaContainer, "container", proxmox.ResourceTypeVM, "lxc"),
 	}
 	objects := map[string]map[string]map[string]any{}
 	for key, r := range kinds {

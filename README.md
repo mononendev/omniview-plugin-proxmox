@@ -85,7 +85,9 @@ workspace, `omniview-dev plugin dev restart proxmox`) after adding or removing c
 existing entry apply on its next connect.
 
 Open **Proxmox VE** in the sidebar and click the cluster row; it connects and opens the virtual
-machine table. While connected the plugin issues four GET requests every 10 seconds, plus one per
+machine table. Connecting asks the cluster for `ceph status` once; the **Ceph** section appears
+only if that succeeds, so a cluster without Ceph shows none (Ceph installed later appears on the
+next connect). While connected the plugin issues four GET requests every 10 seconds, plus one per
 Ceph view opened since connecting, plus one guest config read per VM or container each minute (see
 [Relationships](#relationships)).
 
@@ -129,8 +131,12 @@ have no such `id` and are identified by their Ceph name: the cluster `fsid`, `po
 
 Ceph state is cluster-wide but Proxmox serves it only from nodes with Ceph installed. A Ceph
 request goes to the node that answered the previous one, falling back to every other online node
-in name order. If none answers, the request fails with `CEPH_UNAVAILABLE` and each node's error;
-that is expected on a cluster without Ceph, since the Ceph kinds are listed for every cluster.
+in name order. If none answers, the request fails with `CEPH_UNAVAILABLE` and each node's error,
+e.g. when Ceph stops answering after connect.
+
+The Ceph Status detail view summarises `ceph status` the way `ceph -s` does: health checks with
+their detail, raw capacity, monitors in quorum, managers, OSDs up/in, metadata servers, placement
+group states and client I/O. The JSON view keeps the full monitor and manager maps.
 
 Proxmox has no change feed, so while a connection is open each kind is re-read every 10 seconds
 and changes are pushed to the UI as watch events. Cluster kinds are watched from connect; a Ceph

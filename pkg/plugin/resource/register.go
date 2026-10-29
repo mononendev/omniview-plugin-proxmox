@@ -70,33 +70,45 @@ var (
 
 // Register adds the resource capability to plugin. Registrations carry no
 // ResourceDefinition: no RPC delivers definitions to the UI, which owns the
-// table columns (ui/src/utils/columns.ts). Ceph kinds are registered for
-// every cluster; one without Ceph answers them with CEPH_UNAVAILABLE.
+// table columns (ui/src/utils/columns.ts).
+//
+// The Ceph kinds are not static registrations: cephDiscovery adds their types
+// to a connection only when its cluster answers `ceph status`, so a cluster
+// without Ceph has no Ceph section. Exact-key Patterns route them to their
+// resourcers.
 func Register(plugin *sdk.Plugin) {
+	ceph := []sdkresource.ResourceRegistration[proxmox.Client]{
+		{Meta: metaCephCluster, Resourcer: cephKind(metaCephCluster, "Ceph cluster", (*proxmox.Client).CephStatus)},
+		{Meta: metaCephPool, Resourcer: cephKind(metaCephPool, "Ceph pool", (*proxmox.Client).CephPools)},
+		{Meta: metaCephOSD, Resourcer: cephKind(metaCephOSD, "Ceph OSD", (*proxmox.Client).CephOSDs)},
+		{Meta: metaCephMonitor, Resourcer: cephKind(metaCephMonitor, "Ceph monitor", (*proxmox.Client).CephMonitors)},
+		{Meta: metaCephManager, Resourcer: cephKind(metaCephManager, "Ceph manager", (*proxmox.Client).CephManagers)},
+		{Meta: metaCephMDS, Resourcer: cephKind(metaCephMDS, "Ceph metadata server", (*proxmox.Client).CephMetadataServers)},
+		{Meta: metaCephFS, Resourcer: cephKind(metaCephFS, "CephFS", (*proxmox.Client).CephFilesystems)},
+	}
+	cephPatterns := make(map[string]sdkresource.Resourcer[proxmox.Client], len(ceph))
+	cephMetas := make([]sdkresource.ResourceMeta, len(ceph))
+	for i, reg := range ceph {
+		cephPatterns[reg.Meta.Key()] = reg.Resourcer
+		cephMetas[i] = reg.Meta
+	}
+
 	cfg := sdkresource.ResourcePluginConfig[proxmox.Client]{
 		Connections: &connectionProvider{},
 		Resources: []sdkresource.ResourceRegistration[proxmox.Client]{
-			{Meta: metaNode, Resourcer: clusterKind("node", proxmox.ResourceTypeNode, "node")},
-			{Meta: metaStorage, Resourcer: clusterKind("storage", proxmox.ResourceTypeStorage, "storage")},
-			{Meta: metaVM, Resourcer: clusterKind("virtual machine", proxmox.ResourceTypeVM, "qemu")},
-			{Meta: metaContainer, Resourcer: clusterKind("container", proxmox.ResourceTypeVM, "lxc")},
-			{Meta: metaCephCluster, Resourcer: cephKind("Ceph cluster", (*proxmox.Client).CephStatus)},
-			{Meta: metaCephPool, Resourcer: cephKind("Ceph pool", (*proxmox.Client).CephPools)},
-			{Meta: metaCephOSD, Resourcer: cephKind("Ceph OSD", (*proxmox.Client).CephOSDs)},
-			{Meta: metaCephMonitor, Resourcer: cephKind("Ceph monitor", (*proxmox.Client).CephMonitors)},
-			{Meta: metaCephManager, Resourcer: cephKind("Ceph manager", (*proxmox.Client).CephManagers)},
-			{Meta: metaCephMDS, Resourcer: cephKind("Ceph metadata server", (*proxmox.Client).CephMetadataServers)},
-			{Meta: metaCephFS, Resourcer: cephKind("CephFS", (*proxmox.Client).CephFilesystems)},
+			{Meta: metaNode, Resourcer: clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node")},
+			{Meta: metaStorage, Resourcer: clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage")},
+			{Meta: metaVM, Resourcer: clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu")},
+			{Meta: metaContainer, Resourcer: clusterKind(metaContainer, "container", proxmox.ResourceTypeVM, "lxc")},
 		},
+		Patterns:  cephPatterns,
+		Discovery: &cephDiscovery{metas: cephMetas},
 		Groups: []sdkresource.ResourceGroup{{
 			ID:          group,
 			Name:        "Proxmox VE",
 			Description: "Proxmox VE cluster resources",
 			Resources: map[string][]sdkresource.ResourceMeta{
-				version: {
-					metaNode, metaStorage, metaVM, metaContainer,
-					metaCephCluster, metaCephPool, metaCephOSD, metaCephMonitor, metaCephManager, metaCephMDS, metaCephFS,
-				},
+				version: {metaNode, metaStorage, metaVM, metaContainer},
 			},
 		}},
 	}

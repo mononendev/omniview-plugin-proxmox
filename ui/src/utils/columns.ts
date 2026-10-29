@@ -1,6 +1,7 @@
 import type { StatusDotStatus } from '@omniviewdev/base-ui';
 
 import { RESOURCE_KEYS } from '../constants';
+import { monitorCount } from './cephStatus';
 import { parseStorageId, refsOf } from './refs';
 
 /** A native Proxmox API object, passed through unmodified by the backend. */
@@ -91,7 +92,7 @@ const KINDS: Record<string, Kind> = {
     columns: [
       { field: 'fsid', header: 'FSID' },
       { field: 'health.status', header: 'Health', status: true },
-      { field: 'monmap.num_mons', header: 'Monitors' },
+      { field: 'monmap.mons', header: 'Monitors', value: monitorCount },
       { field: 'osdmap.num_osds', header: 'OSDs' },
       { field: 'osdmap.num_up_osds', header: 'OSDs up' },
       { field: 'osdmap.num_in_osds', header: 'OSDs in' },
@@ -266,9 +267,13 @@ const STATUS_BY_VALUE: Record<string, StatusDotStatus> = {
   'up:standby-replay': 'info',
 };
 
-export function columnStatus(value: unknown, col: Column): StatusDotStatus | undefined {
-  if (!col.status) return undefined;
+/** Status dot colour of a status value. */
+export function statusOf(value: unknown): StatusDotStatus {
   return STATUS_BY_VALUE[stringify(value)] ?? 'neutral';
+}
+
+export function columnStatus(value: unknown, col: Column): StatusDotStatus | undefined {
+  return col.status ? statusOf(value) : undefined;
 }
 
 /** Human label: guests by name and VMID, storage by pool and node, Ceph objects by their ID. */

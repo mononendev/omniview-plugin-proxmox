@@ -21,6 +21,10 @@ type lister func(context.Context, *proxmox.Client) ([]proxmox.Entry, error)
 // cluster-unique `id` for /cluster/resources kinds (qemu/100, node/pve1,
 // storage/pve1/local), the Ceph name otherwise.
 type listResourcer struct {
+	// key is the resource key the resourcer serves. Watch emits it rather than
+	// its meta argument's: the SDK passes an empty meta to the watches of
+	// pattern-routed (discovered) kinds.
+	key string
 	// noun names one object in messages: "virtual machine", "Ceph pool".
 	noun   string
 	list   lister
@@ -38,8 +42,9 @@ var (
 
 // clusterKind serves the /cluster/resources entries of one type, watched
 // from connect, with refsField added where the type declares relationships.
-func clusterKind(noun string, apiType proxmox.ResourceType, entryType string) *listResourcer {
+func clusterKind(meta sdkresource.ResourceMeta, noun string, apiType proxmox.ResourceType, entryType string) *listResourcer {
 	return &listResourcer{
+		key:           meta.Key(),
 		noun:          noun,
 		policy:        sdkresource.SyncOnConnect,
 		relationships: relationshipsOf(entryType),
@@ -63,10 +68,15 @@ func clusterKind(noun string, apiType proxmox.ResourceType, entryType string) *l
 }
 
 // cephKind serves one Ceph kind from a Client method expression, e.g.
-// (*proxmox.Client).CephPools. It is watched only once opened: most clusters
-// have no Ceph, and those that do need no Ceph polling until asked.
-func cephKind(noun string, method func(*proxmox.Client, context.Context) ([]proxmox.Entry, error)) *listResourcer {
+// (*proxmox.Client).CephPools. It is watched only once opened: Ceph state
+// needs no polling until asked.
+func cephKind(
+	meta sdkresource.ResourceMeta,
+	noun string,
+	method func(*proxmox.Client, context.Context) ([]proxmox.Entry, error),
+) *listResourcer {
 	return &listResourcer{
+		key:    meta.Key(),
 		noun:   noun,
 		policy: sdkresource.SyncOnFirstQuery,
 		list: func(ctx context.Context, client *proxmox.Client) ([]proxmox.Entry, error) {

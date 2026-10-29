@@ -25,10 +25,10 @@ var _ sdkresource.Watcher[proxmox.Client] = (*listResourcer)(nil)
 func (r *listResourcer) Watch(
 	ctx context.Context,
 	client *proxmox.Client,
-	meta sdkresource.ResourceMeta,
+	_ sdkresource.ResourceMeta,
 	sink sdkresource.WatchEventSink,
 ) error {
-	w := pollWatch{resourcer: r, client: client, key: meta.Key(), sink: sink, seen: map[string]json.RawMessage{}}
+	w := pollWatch{resourcer: r, client: client, key: r.key, sink: sink, seen: map[string]json.RawMessage{}}
 	sink.OnStateChange(sdkresource.WatchStateEvent{ResourceKey: w.key, State: sdkresource.WatchStateSyncing})
 
 	ticker := time.NewTicker(pollInterval)
