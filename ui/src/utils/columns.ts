@@ -222,7 +222,8 @@ export function formatBytes(bytes: number): string {
     value /= 1024;
     unit += 1;
   }
-  return `${unit === 0 ? value : value.toFixed(1)} ${BYTE_UNITS[unit]}`;
+  // Rates (bytes/s averaged by Proxmox) are fractional; whole bytes are enough.
+  return `${unit === 0 ? Math.round(value) : value.toFixed(1)} ${BYTE_UNITS[unit]}`;
 }
 
 /** `12d 4h`, `3h 20m`, `45m`; under a minute is `<1m`. */
