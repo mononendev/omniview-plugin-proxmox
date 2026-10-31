@@ -14,10 +14,20 @@ import (
 	"testing"
 	"time"
 
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 	sdklogs "github.com/omniviewdev/plugin-sdk/pkg/v1/logs"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
+
+// body is a resource body as the host passes it.
+func body(fields map[string]any) *resourcev2.Value {
+	v, err := resourcev2.ValueFromNative(fields)
+	if err != nil {
+		panic(err)
+	}
+	return &v
+}
 
 // fakeJournal is a node journal behind GET /nodes/ares/syslog with the
 // API's semantics: since filters at second resolution (node-local wall
@@ -359,8 +369,8 @@ func TestLocateMapsDaemonsToUnits(t *testing.T) {
 		data       map[string]any
 		node, unit string
 	}{
-		{keyCephOSD, "osd.19", map[string]any{"name": "osd.19", "id": float64(19), "host": "ares"}, "ares", "ceph-osd@19"},
-		{keyCephOSD, "", map[string]any{"name": "weird", "id": float64(7), "host": "apollo"}, "apollo", "ceph-osd@7"},
+		{keyCephOSD, "osd.19", map[string]any{"name": "osd.19", "id": int64(19), "host": "ares"}, "ares", "ceph-osd@19"},
+		{keyCephOSD, "", map[string]any{"name": "weird", "id": int64(7), "host": "apollo"}, "apollo", "ceph-osd@7"},
 		{keyCephMon, "apollo", map[string]any{"name": "apollo", "host": "apollo"}, "apollo", "ceph-mon@apollo"},
 		{keyCephMgr, "ares", map[string]any{"name": "ares", "host": "ares"}, "ares", "ceph-mgr@ares"},
 		{keyCephMDS, "ares-ssd", map[string]any{"name": "ares-ssd", "host": "ares"}, "ares", "ceph-mds@ares-ssd"},
@@ -376,11 +386,11 @@ func TestLocateMapsDaemonsToUnits(t *testing.T) {
 		t.Error("daemon without host located")
 	}
 
-	src := sourcesFor(keyCephOSD)("osd.19", map[string]any{"name": "osd.19", "host": "ares"}, sdklogs.LogSessionOptions{})
+	src := sourcesFor(keyCephOSD)("osd.19", body(map[string]any{"name": "osd.19", "host": "ares"}), sdklogs.LogSessionOptions{})
 	if len(src) != 1 || src[0].Labels[labelNode] != "ares" || src[0].Labels[labelUnit] != "ceph-osd@19" {
 		t.Errorf("sources = %+v", src)
 	}
-	if src := sourcesFor(keyCephOSD)("", map[string]any{}, sdklogs.LogSessionOptions{}); len(src) != 0 {
+	if src := sourcesFor(keyCephOSD)("", body(map[string]any{}), sdklogs.LogSessionOptions{}); len(src) != 0 {
 		t.Errorf("unlocatable resource has sources %+v", src)
 	}
 }

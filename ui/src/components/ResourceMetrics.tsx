@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { EmptyState, Meter, SegmentedControl, Spinner, Stack, Text } from '@omniviewdev/base-ui';
-import { useResourceMetrics } from '@omniviewdev/runtime';
+import { type HostRecord, useResourceMetrics } from '@omniviewdev/runtime';
 import { MetricShape, type QueryResponse } from '@omniviewdev/runtime/models';
 import { LuChartLine } from 'react-icons/lu';
 
 import { PLUGIN_ID, RESOURCE_KEYS, USAGE_ZONES } from '../constants';
-import { type NativeObject, formatBytes } from '../utils/columns';
+import { formatBytes } from '../utils/columns';
 import {
   type ChartTimeRange,
   DEFAULT_TIME_RANGE_PRESETS,
@@ -43,10 +43,8 @@ const formatSize = (v: number | null) => (v == null || Number.isNaN(v) ? '–' :
 const formatLoad = (v: number | null) => (v == null || Number.isNaN(v) ? '–' : v.toFixed(2));
 
 type Props = {
-  connectionId: string;
-  resourceKey: string;
-  resourceId: string;
-  data?: NativeObject;
+  /** The host's current record of the node or guest. */
+  record: HostRecord;
 };
 
 type Extracted = {
@@ -83,8 +81,9 @@ function extract(responses: Record<string, QueryResponse> | undefined): Extracte
  * Drawer view of a node's or guest's RRD metrics: current CPU and memory
  * use, then time series over the last hour, day or week.
  */
-export default function ResourceMetrics({ connectionId, resourceKey, resourceId, data }: Props) {
-  const isNode = resourceKey === RESOURCE_KEYS.node;
+export default function ResourceMetrics({ record }: Props) {
+  const { reference } = record.record;
+  const isNode = reference.address.type === RESOURCE_KEYS.node;
   const metricIDs = isNode ? NODE_METRICS : GUEST_METRICS;
   const [duration, setDuration] = useState(DEFAULT_TIME_RANGE_PRESETS[0].duration);
   const [range, setRange] = useState<ChartTimeRange>(() => rangeFromDuration(duration));
@@ -95,7 +94,16 @@ export default function ResourceMetrics({ connectionId, resourceKey, resourceId,
     return () => clearInterval(timer);
   }, [duration]);
 
-  const query = { pluginID: PLUGIN_ID, connectionID: connectionId, resourceKey, resourceID: resourceId, resourceData: data, metricIDs };
+  const query = {
+    pluginID: PLUGIN_ID,
+    connectionID: record.route.connection,
+    resourceKey: reference.address.type,
+    resourceID: reference.address.id,
+    resourceData: record.record.body,
+    reference,
+    route: record.route,
+    metricIDs,
+  };
   const current = useResourceMetrics({ ...query, shape: MetricShape.ShapeCurrent, refreshInterval: REFRESH_MS });
   const timeseries = useResourceMetrics({
     ...query,

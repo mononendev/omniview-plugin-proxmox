@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -117,7 +118,7 @@ func TestGuestConfigSplitsDigest(t *testing.T) {
 	if digest != "abc123" {
 		t.Fatalf("digest %q", digest)
 	}
-	if _, ok := config["digest"]; ok || config["name"] != "web01" || config["cores"] != float64(4) {
+	if _, ok := config["digest"]; ok || config["name"] != "web01" || config["cores"] != json.Number("4") {
 		t.Fatalf("unexpected config %v", config)
 	}
 	if got[0].method != http.MethodGet || got[0].path != "/api2/json/nodes/pve2/qemu/100/config" {

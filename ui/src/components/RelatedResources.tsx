@@ -4,7 +4,8 @@ import { LuWaypoints } from 'react-icons/lu';
 
 import { PLUGIN_ID, RESOURCE_KEYS } from '../constants';
 import { useClusterObjects } from '../hooks/useClusterObjects';
-import { type ProxmoxObject, columnStatus, displayName, kindFor } from '../utils/columns';
+import { type ProxmoxEntry, errorMessage } from '../hooks/useProxmoxResources';
+import { columnStatus, displayName, kindFor } from '../utils/columns';
 
 const rootStyle = { width: '100%' } as const;
 const centerStyle = { display: 'flex', justifyContent: 'center', padding: '32px 0' } as const;
@@ -25,10 +26,9 @@ const GROUPS = [
 ];
 
 type Props = {
-  connectionId: string;
-  resourceKey: string;
-  resourceId: string;
-  onOpen: (resourceKey: string, row: ProxmoxObject) => void;
+  /** The object whose relations are shown. */
+  entry: ProxmoxEntry;
+  onOpen: (entry: ProxmoxEntry) => void;
 };
 
 /**
@@ -36,14 +36,14 @@ type Props = {
  * a guest's node and storage, a node's guests and storage, a storage entry's
  * node and the guests with disks on it.
  */
-export default function RelatedResources({ connectionId, resourceKey, resourceId, onOpen }: Props) {
+export default function RelatedResources({ entry, onOpen }: Props) {
+  const { route, record } = entry.record;
   const { related, isLoading, error } = useRelatedResources({
     pluginID: PLUGIN_ID,
-    connectionID: connectionId,
-    resourceKey,
-    resourceID: resourceId,
+    reference: record.reference,
+    route,
   });
-  const { objects } = useClusterObjects(connectionId);
+  const { objects } = useClusterObjects(route.connection);
 
   if (isLoading) {
     return (
@@ -58,7 +58,7 @@ export default function RelatedResources({ connectionId, resourceKey, resourceId
         size="sm"
         icon={<LuWaypoints />}
         title="Could not load related resources"
-        description={error instanceof Error ? error.message : String(error)}
+        description={errorMessage(error)}
       />
     );
   }
@@ -66,11 +66,15 @@ export default function RelatedResources({ connectionId, resourceKey, resourceId
   const groups = GROUPS.map((group) => {
     const kind = kindFor(group.resourceKey);
     const ids = [
-      ...new Set(related.filter((r) => r.resource.resourceKey === group.resourceKey).map((r) => r.resource.id)),
+      ...new Set(
+        related
+          .filter((r) => r.resource.reference.address.type === group.resourceKey)
+          .map((r) => r.resource.reference.address.id),
+      ),
     ];
     const rows = ids.map((id) => {
-      const data = objects.get(id)?.data;
-      return { id, data, name: data ? displayName(data, kind) : id };
+      const object = objects.get(id);
+      return { id, object, data: object?.data, name: object ? displayName(object.data, kind) : id };
     });
     rows.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     return { ...group, rows };
@@ -101,8 +105,8 @@ export default function RelatedResources({ connectionId, resourceKey, resourceId
                 return (
                   <Table.Row
                     key={row.id}
-                    interactive={!!row.data}
-                    onClick={row.data ? () => onOpen(group.resourceKey, row.data!) : undefined}
+                    interactive={!!row.object}
+                    onClick={row.object ? () => onOpen(row.object!) : undefined}
                   >
                     <Table.Cell truncate>
                       <Stack direction="row" align="center" spacing={2}>

@@ -13,11 +13,21 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 	"github.com/omniviewdev/plugin-sdk/pkg/types"
 	sdkexec "github.com/omniviewdev/plugin-sdk/pkg/v1/exec"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
+
+// body is a resource body as the host passes it.
+func body(fields map[string]any) *resourcev2.Value {
+	v, err := resourcev2.ValueFromNative(fields)
+	if err != nil {
+		panic(err)
+	}
+	return &v
+}
 
 // fakePVE serves termproxy and vncwebsocket; ws runs on each accepted
 // websocket after the handler checks the termproxy handshake.
@@ -162,7 +172,7 @@ func TestShellBridgesPTYAndTermproxy(t *testing.T) {
 
 	s := startSession(t, handler, sdkexec.SessionOptions{
 		ResourcePlugin: "proxmox", ResourceKey: keyContainer,
-		ResourceData: map[string]any{"id": "lxc/101", "node": "pve2", "vmid": float64(101)},
+		ResourceData: body(map[string]any{"id": "lxc/101", "node": "pve2", "vmid": 101}),
 		TTY:          true,
 	})
 	// The UI sizes the terminal right away, usually while still connecting.
@@ -205,7 +215,7 @@ func TestShellCancelClosesWebsocket(t *testing.T) {
 		closed <- websocket.CloseStatus(err)
 	}
 	s := startSession(t, handlerFor(t, keyNode, f.clients()), sdkexec.SessionOptions{
-		ResourceData: map[string]any{"id": "node/ares", "node": "ares"},
+		ResourceData: body(map[string]any{"id": "node/ares", "node": "ares"}),
 	})
 	// Output on the PTY means the session is connected and bridging.
 	ready := make([]byte, 5)
@@ -233,7 +243,7 @@ func TestShellCancelWhileConnecting(t *testing.T) {
 		<-r.Context().Done() // never answers; the client must give up
 	}}
 	s := startSession(t, handlerFor(t, keyNode, f.clients()), sdkexec.SessionOptions{
-		ResourceData: map[string]any{"id": "node/ares"},
+		ResourceData: body(map[string]any{"id": "node/ares"}),
 	})
 	<-requested
 	s.cancel()
@@ -245,7 +255,7 @@ func TestShellCancelWhileConnecting(t *testing.T) {
 func TestShellInvalidResourceReportedOnStopCh(t *testing.T) {
 	f := &fakePVE{t: t}
 	s := startSession(t, handlerFor(t, keyVM, f.clients()), sdkexec.SessionOptions{
-		ResourceData: map[string]any{"id": "qemu/100"},
+		ResourceData: body(map[string]any{"id": "qemu/100"}),
 	})
 	if execErr := stoppedWithExecError(t, s); execErr.Title != "Invalid resource" || execErr.Retryable {
 		t.Fatalf("ExecError = %+v", execErr)
@@ -257,7 +267,7 @@ func TestShellPermissionDenied(t *testing.T) {
 		http.Error(w, "Permission check failed (/nodes/ares, Sys.Console)", http.StatusForbidden)
 	}}
 	s := startSession(t, handlerFor(t, keyNode, f.clients()), sdkexec.SessionOptions{
-		ResourceData: map[string]any{"id": "node/ares"},
+		ResourceData: body(map[string]any{"id": "node/ares"}),
 	})
 	execErr := stoppedWithExecError(t, s)
 	// PVE puts "Permission check failed (...)" in the reason phrase, which a Go
@@ -280,7 +290,7 @@ func TestShellVMWithoutSerialPort(t *testing.T) {
 		_ = conn.Close(websocket.StatusNormalClosure, "")
 	}
 	s := startSession(t, handlerFor(t, keyVM, f.clients()), sdkexec.SessionOptions{
-		ResourceData: map[string]any{"id": "qemu/100", "node": "apollo", "vmid": float64(100)},
+		ResourceData: body(map[string]any{"id": "qemu/100", "node": "apollo", "vmid": 100}),
 	})
 	if got := <-serial; got != "serial0" {
 		t.Fatalf("serial = %q, want serial0", got)
@@ -299,20 +309,20 @@ func TestTargets(t *testing.T) {
 		want    proxmox.TermTarget
 		wantErr bool
 	}{
-		{"node from id", nodeTarget, sdkexec.SessionOptions{ResourceData: map[string]any{"id": "node/ares"}},
+		{"node from id", nodeTarget, sdkexec.SessionOptions{ResourceData: body(map[string]any{"id": "node/ares"})},
 			proxmox.TermTarget{Node: "ares"}, false},
-		{"node missing", nodeTarget, sdkexec.SessionOptions{ResourceData: map[string]any{}}, proxmox.TermTarget{}, true},
+		{"node missing", nodeTarget, sdkexec.SessionOptions{ResourceData: body(map[string]any{})}, proxmox.TermTarget{}, true},
 		{"lxc vmid from id", guestTarget(guestLXC),
-			sdkexec.SessionOptions{ResourceData: map[string]any{"id": "lxc/1000", "omniview": map[string]any{"node": "apollo"}}},
+			sdkexec.SessionOptions{ResourceData: body(map[string]any{"id": "lxc/1000", "omniview": map[string]any{"node": "apollo"}})},
 			proxmox.TermTarget{Node: "apollo", GuestType: "lxc", VMID: 1000}, false},
 		{"qemu serial param", guestTarget(guestQemu),
-			sdkexec.SessionOptions{ResourceData: map[string]any{"node": "ares", "vmid": float64(100)}, Params: map[string]string{"serial": "serial2"}},
+			sdkexec.SessionOptions{ResourceData: body(map[string]any{"node": "ares", "vmid": 100}), Params: map[string]string{"serial": "serial2"}},
 			proxmox.TermTarget{Node: "ares", GuestType: "qemu", VMID: 100, Serial: "serial2"}, false},
 		{"qemu bad serial", guestTarget(guestQemu),
-			sdkexec.SessionOptions{ResourceData: map[string]any{"node": "ares", "vmid": float64(100)}, Params: map[string]string{"serial": "ttyS0"}},
+			sdkexec.SessionOptions{ResourceData: body(map[string]any{"node": "ares", "vmid": 100}), Params: map[string]string{"serial": "ttyS0"}},
 			proxmox.TermTarget{}, true},
 		{"guest without vmid", guestTarget(guestQemu),
-			sdkexec.SessionOptions{ResourceData: map[string]any{"node": "ares", "id": "lxc/5"}}, proxmox.TermTarget{}, true},
+			sdkexec.SessionOptions{ResourceData: body(map[string]any{"node": "ares", "id": "lxc/5"})}, proxmox.TermTarget{}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

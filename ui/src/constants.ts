@@ -29,8 +29,26 @@ export const METRIC_RESOURCE_KEYS: ReadonlySet<string> = new Set([
   RESOURCE_KEYS.container,
 ]);
 
-/** Sidebar order for backend-supplied categories; unknown categories follow alphabetically. */
+/** Sidebar order of the categories. */
 export const CATEGORY_ORDER = ['Compute', 'Cluster', 'Ceph'];
+
+/** Sidebar category of each resource type; the backend catalog has none. */
+export const CATEGORY_BY_KEY: Readonly<Record<string, string>> = {
+  [RESOURCE_KEYS.node]: 'Cluster',
+  [RESOURCE_KEYS.storage]: 'Cluster',
+  [RESOURCE_KEYS.virtualMachine]: 'Compute',
+  [RESOURCE_KEYS.container]: 'Compute',
+  [RESOURCE_KEYS.cephCluster]: 'Ceph',
+  [RESOURCE_KEYS.cephPool]: 'Ceph',
+  [RESOURCE_KEYS.cephOSD]: 'Ceph',
+  [RESOURCE_KEYS.cephMonitor]: 'Ceph',
+  [RESOURCE_KEYS.cephManager]: 'Ceph',
+  [RESOURCE_KEYS.cephMetadataServer]: 'Ceph',
+  [RESOURCE_KEYS.cephFilesystem]: 'Ceph',
+};
+
+/** Objects per enumerated page: the SDK's maximum. */
+export const PAGE_SIZE = 256;
 
 /** Usage meter colours by percent: green to 60, amber to 85, red above. */
 export const USAGE_ZONES = { low: 60, high: 85, optimum: 0 } as const;

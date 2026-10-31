@@ -1,4 +1,4 @@
-import type { DrawerComponentAction, DrawerContext } from '@omniviewdev/runtime';
+import { type DrawerComponentAction, type DrawerContext, valueToJSON } from '@omniviewdev/runtime';
 import {
   LuCirclePause,
   LuCirclePlay,
@@ -20,13 +20,16 @@ type Ctx = DrawerContext<NativeObject>;
 type Action = DrawerComponentAction<NativeObject>;
 
 function targetOf(ctx: Ctx): ActionTarget {
-  const id = ctx.resource?.id ?? '';
+  const record = ctx.resource?.record;
+  if (!record) throw new Error('The action has no resource record');
+  const { type, id } = record.record.reference.address;
   return {
-    connectionID: ctx.resource?.connectionID ?? '',
-    resourceKey: ctx.resource?.key ?? '',
+    connectionID: record.route.connection,
+    resourceKey: type,
     id,
     name: ctx.resource?.name || id,
     data: ctx.data ?? {},
+    record,
   };
 }
 
@@ -35,12 +38,23 @@ const isTemplate = (ctx: Ctx) => ctx.data?.template === 1 || ctx.data?.template 
 const isRunning = (ctx: Ctx) => status(ctx) === 'running' && !isTemplate(ctx);
 const isPaused = (ctx: Ctx) => status(ctx) === 'paused' || status(ctx) === 'suspended';
 
-/** Runs a lifecycle action. The runtime reports the result and any error. */
+/** Runs a lifecycle action and shows its result; the runtime reports any error. */
 function runLifecycle(ctx: Ctx, actionID: string, progress: string) {
   const deps = actionDeps(ctx);
   const target = targetOf(ctx);
   deps.notify(`${progress} ${target.name}…`);
-  deps.executeAction({ actionID, id: target.id }).catch(() => undefined);
+  deps
+    .executeAction({
+      route: target.record.route,
+      reference: target.record.record.reference,
+      action: actionID,
+      input: { kind: 'map', value: {} },
+    })
+    .then((result) => {
+      const { message } = valueToJSON(result) as { message?: string };
+      if (message) deps.notify(message);
+    })
+    .catch(() => undefined);
 }
 
 /** A lifecycle action that asks first, as the Proxmox web UI does. */
@@ -69,7 +83,9 @@ function openShell(ctx: Ctx, params: Record<string, string>) {
     opts: {
       resource_plugin: PLUGIN_ID,
       resource_key: target.resourceKey,
-      resource_data: target.data,
+      resource_data: target.record.record.body,
+      reference: target.record.record.reference,
+      route: target.record.route,
       params,
       tty: true,
     },
@@ -86,7 +102,9 @@ const viewLogs: Action = {
         connectionID: target.connectionID,
         resourceKey: target.resourceKey,
         resourceID: target.id,
-        resourceData: target.data,
+        resourceData: target.record.record.body,
+        reference: target.record.record.reference,
+        route: target.record.route,
         label: `Logs ${target.name}`,
         icon: 'LuLogs',
       })

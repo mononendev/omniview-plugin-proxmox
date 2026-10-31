@@ -1,5 +1,14 @@
-import type { ConfirmationModalContextType, DrawerContext } from '@omniviewdev/runtime';
-import type { ActionResult, SessionOptions } from '@omniviewdev/runtime/models';
+import type {
+  AccessRoute,
+  ActionRequest,
+  ConfirmationModalContextType,
+  DrawerContext,
+  HostRecord,
+  MutationRequest,
+  ResourceReference,
+  Value,
+} from '@omniviewdev/runtime';
+import type { SessionOptions } from '@omniviewdev/runtime/models';
 import type { ReactNode } from 'react';
 
 import type { NativeObject } from '../utils/columns';
@@ -13,12 +22,15 @@ export type ActionTarget = {
   /** Human label, e.g. `web01 (100)`. */
   name: string;
   data: NativeObject;
+  /** The host's record: reference, route and the body as a Value. */
+  record: HostRecord;
 };
 
-/** Runs a backend action on one object of the bound resource kind (runtime `useExecuteAction`). */
-export type ExecuteAction = (args: { actionID: string; id: string; params?: Record<string, unknown> }) => Promise<
-  ActionResult | null
->;
+/** Runs a backend action (runtime `useExecuteAction`); the runtime reports failures. */
+export type ExecuteAction = (request: ActionRequest) => Promise<Value>;
+
+/** Updates or deletes a resource (runtime `useResourceMutations().mutate`); the runtime reports failures. */
+export type MutateResource = (request: MutationRequest) => Promise<unknown>;
 
 /** Opens a terminal tab (runtime `useExec().createSession`); failures are reported by the runtime. */
 export type CreateExecSession = (args: {
@@ -26,14 +38,16 @@ export type CreateExecSession = (args: {
   label?: string;
   icon?: string | ReactNode;
   opts: Partial<SessionOptions>;
-}) => Promise<void>;
+}) => Promise<unknown>;
 
 /** Opens a log viewer tab (runtime `useLogs().createLogSession`). */
 export type CreateLogSession = (args: {
   connectionID: string;
   resourceKey: string;
   resourceID: string;
-  resourceData: Record<string, unknown>;
+  resourceData: Value;
+  reference?: ResourceReference;
+  route?: AccessRoute;
   label?: string;
   icon?: string | ReactNode;
 }) => Promise<unknown>;
@@ -48,7 +62,7 @@ export type ActionDeps = {
   executeAction: ExecuteAction;
   createExecSession: CreateExecSession;
   createLogSession: CreateLogSession;
-  /** Shows a short progress notice while a slow task runs. */
+  /** Shows a short notice: task progress or its result. */
   notify: (message: string) => void;
   openEditConfig: (target: ActionTarget) => void;
   openDelete: (target: ActionTarget) => void;
@@ -64,6 +78,6 @@ export function bindActionDeps(ctx: DrawerContext, deps: ActionDeps): DrawerCont
 /** The handlers bound to `ctx`. Call it inside an action handler. */
 export function actionDeps(ctx: DrawerContext): ActionDeps {
   const deps = bound.get(ctx);
-  if (!deps) throw new Error(`No action handlers are mounted for ${ctx.resource?.key ?? 'this resource'}`);
+  if (!deps) throw new Error(`No action handlers are mounted for ${ctx.resource?.reference.address.type ?? 'this resource'}`);
   return deps;
 }

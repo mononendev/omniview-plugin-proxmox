@@ -1,13 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { Button, EmptyState, Meter, Spinner, StatusDot, Text } from '@omniviewdev/base-ui';
-import {
-  ResourceIcon,
-  useConnection,
-  useConnectionStatus,
-  usePluginRouter,
-  useResourceTypes,
-  useResources,
-} from '@omniviewdev/runtime';
+import { ResourceIcon, useConnection, useConnectionStatus, usePluginRouter, useResourceTypes } from '@omniviewdev/runtime';
 import type { IconType } from 'react-icons';
 import {
   LuBox,
@@ -23,16 +16,17 @@ import {
   LuServer,
   LuTriangleAlert,
 } from 'react-icons/lu';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router';
 
-import { CEPH_USAGE_ZONES, PLUGIN_ID, RESOURCE_KEYS, USAGE_ZONES, resourcePath } from '../constants';
-import { useClusterObjects } from '../hooks/useClusterObjects';
+import { CEPH_USAGE_ZONES, PAGE_SIZE, PLUGIN_ID, RESOURCE_KEYS, USAGE_ZONES, resourcePath } from '../constants';
+import { type ClusterObject, useClusterObjects } from '../hooks/useClusterObjects';
 import { useOpenResource } from '../hooks/useOpenResource';
 import { useProxmoxConnection } from '../hooks/useProxmoxConnection';
+import { useProxmoxResources } from '../hooks/useProxmoxResources';
 import { type CephStatusSummary, summarizeCephStatus } from '../utils/cephStatus';
 import { type ClusterOverview, type GuestBreakdown, type GuestLoad, type Issue, analyzeCluster } from '../utils/clusterOverview';
 import type { Capacity } from '../utils/clusterSummary';
-import { type NativeObject, formatBytes, formatDuration, statusOf } from '../utils/columns';
+import { formatBytes, formatDuration, statusOf } from '../utils/columns';
 import styles from './OverviewPage.module.css';
 
 const percent = (fraction: number) => Math.round(fraction * 100);
@@ -53,14 +47,16 @@ export default function OverviewPage() {
   const { connection } = useConnection({ pluginID: PLUGIN_ID, connectionID: connectionId });
   const { entries } = useConnectionStatus();
   const name = connection.data?.name || connectionId;
-  const status = entries.find((e) => e.pluginID === PLUGIN_ID && e.connectionID === connectionId);
+  const status = entries.find(
+    (e) => e.pluginID === PLUGIN_ID && e.connectionID === connectionId && e.readiness === 'CONNECTED',
+  );
 
   if (!status) return <NotConnected connectionId={connectionId} name={name} />;
   return <ConnectedOverview connectionId={connectionId} name={name} stale={status.hasErrors} />;
 }
 
 function NotConnected({ connectionId, name }: { connectionId: string; name: string }) {
-  const { pending, connect } = useProxmoxConnection(connectionId, name, false);
+  const { pending, connect } = useProxmoxConnection(connectionId, false);
   return (
     <div className={styles.Center}>
       <EmptyState
@@ -81,9 +77,9 @@ type ConnectedProps = { connectionId: string; name: string; stale: boolean };
 
 function ConnectedOverview({ connectionId, name, stale }: ConnectedProps) {
   const cluster = useClusterObjects(connectionId);
-  // Same query as the sidebar: connecting lists the Ceph kinds only when the cluster answers `ceph status`.
-  const { types } = useResourceTypes({ pluginID: PLUGIN_ID, connectionID: connectionId });
-  const hasCeph = Boolean(types.data?.[RESOURCE_KEYS.cephCluster]);
+  // Same query as the sidebar: the catalog has the Ceph types only when connecting found Ceph.
+  const { resourceTypes } = useResourceTypes({ pluginID: PLUGIN_ID, route: { connection: connectionId } });
+  const hasCeph = Boolean(resourceTypes.data?.some((t) => t.type === RESOURCE_KEYS.cephCluster));
   const { nodes, storage, virtualMachines, containers } = cluster;
   const overview = useMemo(
     () => analyzeCluster(nodes, storage, virtualMachines, containers),
@@ -93,7 +89,7 @@ function ConnectedOverview({ connectionId, name, stale }: ConnectedProps) {
   if (cluster.error) {
     return (
       <div className={styles.Center}>
-        <EmptyState icon={<LuCircleAlert />} title="Failed to load the cluster" description={cluster.error.message} />
+        <EmptyState icon={<LuCircleAlert />} title="Failed to load the cluster" description={cluster.error} />
       </div>
     );
   }
@@ -106,34 +102,50 @@ function ConnectedOverview({ connectionId, name, stale }: ConnectedProps) {
   }
 
   const render = (ceph?: CephStatusSummary) => (
-    <OverviewBody connectionId={connectionId} name={name} stale={stale} overview={overview} ceph={ceph} />
+    <OverviewBody
+      connectionId={connectionId}
+      name={name}
+      stale={stale}
+      overview={overview}
+      ceph={ceph}
+      objects={cluster.objects}
+      truncated={cluster.truncated}
+    />
   );
   return hasCeph ? <WithCeph connectionId={connectionId}>{render}</WithCeph> : render();
 }
 
 /** Reads `ceph status`; while Proxmox cannot reach Ceph the page renders without it. */
 function WithCeph({ connectionId, children }: { connectionId: string; children: (ceph?: CephStatusSummary) => ReactNode }) {
-  const { resources } = useResources({
-    pluginID: PLUGIN_ID,
-    connectionID: connectionId,
-    resourceKey: RESOURCE_KEYS.cephCluster,
-    idAccessor: 'fsid',
-  });
-  const status = (resources.data?.result as NativeObject[] | undefined)?.[0];
+  const { entries, error } = useProxmoxResources(connectionId, RESOURCE_KEYS.cephCluster);
+  const status = entries[0]?.data;
   const ceph = useMemo(() => (status ? summarizeCephStatus(status) : undefined), [status]);
-  return children(resources.error ? undefined : ceph);
+  return children(error ? undefined : ceph);
 }
 
-type BodyProps = ConnectedProps & { overview: ClusterOverview; ceph?: CephStatusSummary };
+type BodyProps = ConnectedProps & {
+  overview: ClusterOverview;
+  ceph?: CephStatusSummary;
+  objects: Map<string, ClusterObject>;
+  /** Kinds with more objects than one page; the figures count the first page only. */
+  truncated: string[];
+};
 
-function OverviewBody({ connectionId, name, stale, overview, ceph }: BodyProps) {
+function OverviewBody({ connectionId, name, stale, overview, ceph, objects, truncated }: BodyProps) {
   const { navigate } = usePluginRouter();
-  const open = useOpenResource(connectionId);
+  const open = useOpenResource();
+  const openObject = (id: string) => {
+    const object = objects.get(id);
+    if (object) open(object);
+  };
   const openTable = (resourceKey: string) => navigate(resourcePath(connectionId, resourceKey));
   const { summary, allocated } = overview;
 
   const issues: Issue[] = [
     ...(stale ? [{ severity: 'warning' as const, message: 'The last refresh failed; figures may be stale' }] : []),
+    ...truncated.map(
+      (kind): Issue => ({ severity: 'warning', message: `Figures count only the first ${PAGE_SIZE} ${kind}` }),
+    ),
     ...overview.issues,
     ...(ceph?.health.checks ?? [])
       .filter((check) => !check.muted)
@@ -219,7 +231,7 @@ function OverviewBody({ connectionId, name, stale, overview, ceph }: BodyProps) 
                 type="button"
                 className={styles.Row}
                 title={`${n.name}: ${n.cores} cores, ${capacityText(n.memory)} memory`}
-                onClick={() => open(RESOURCE_KEYS.node, n.entry)}
+                onClick={() => openObject(n.entry.id)}
               >
                 <span className={styles.Name}>
                   <StatusDot status={statusOf(n.entry.status)} size="sm" />
@@ -255,7 +267,7 @@ function OverviewBody({ connectionId, name, stale, overview, ceph }: BodyProps) 
                   type="button"
                   className={styles.Row}
                   title={`${s.label}: ${s.type}${s.node ? '' : ', shared'}`}
-                  onClick={() => open(RESOURCE_KEYS.storage, s.entry)}
+                  onClick={() => openObject(s.entry.id)}
                 >
                   <span className={styles.Name}>
                     <StatusDot status={statusOf(s.entry.status)} size="sm" />
@@ -279,7 +291,7 @@ function OverviewBody({ connectionId, name, stale, overview, ceph }: BodyProps) 
           guests={overview.topCpu}
           fraction={(g) => g.cpu}
           amount={(g) => `${g.cores.toFixed(2)} of ${g.vcpus} vCPUs`}
-          onOpen={open}
+          onOpen={openObject}
         />
         <GuestPanel
           title="Largest guests by memory"
@@ -287,7 +299,7 @@ function OverviewBody({ connectionId, name, stale, overview, ceph }: BodyProps) 
           guests={overview.topMemory}
           fraction={(g) => (g.memory.total > 0 ? g.memory.used / g.memory.total : undefined)}
           amount={(g) => capacityText(g.memory)}
-          onOpen={open}
+          onOpen={openObject}
         />
       </div>
     </div>
@@ -438,7 +450,8 @@ type GuestPanelProps = {
   guests: GuestLoad[];
   fraction: (g: GuestLoad) => number | undefined;
   amount: (g: GuestLoad) => string;
-  onOpen: (resourceKey: string, row: NativeObject) => void;
+  /** Opens the guest with this Proxmox ID. */
+  onOpen: (id: string) => void;
 };
 
 function GuestPanel({ title, icon, guests, fraction, amount, onOpen }: GuestPanelProps) {
@@ -451,7 +464,7 @@ function GuestPanel({ title, icon, guests, fraction, amount, onOpen }: GuestPane
       ) : (
         <div className={styles.Table} data-columns="guests">
           {guests.map((g) => (
-            <button key={g.entry.id} type="button" className={styles.Row} onClick={() => onOpen(g.resourceKey, g.entry)}>
+            <button key={g.entry.id} type="button" className={styles.Row} onClick={() => onOpen(g.entry.id)}>
               <span className={styles.Name}>
                 <ResourceIcon pluginId={PLUGIN_ID} resourceKey={g.resourceKey} size={14} />
                 <span title={g.name}>

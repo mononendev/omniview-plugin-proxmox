@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -99,11 +100,18 @@ func (c *Client) DeleteGuest(ctx context.Context, g GuestRef) (string, error) {
 }
 
 // GuestConfig returns the guest's configuration without its digest, and the
-// digest that identifies this version of it for UpdateGuestConfig.
+// digest that identifies this version of it for UpdateGuestConfig. Numbers
+// are json.Number, so integers stay exact.
 func (c *Client) GuestConfig(ctx context.Context, g GuestRef) (map[string]any, string, error) {
-	var config map[string]any
-	if err := c.get(ctx, g.path("/config"), nil, &config); err != nil {
+	var raw json.RawMessage
+	if err := c.get(ctx, g.path("/config"), nil, &raw); err != nil {
 		return nil, "", err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var config map[string]any
+	if err := dec.Decode(&config); err != nil {
+		return nil, "", fmt.Errorf("decode %s config: %w", g.ID, err)
 	}
 	digest, _ := config["digest"].(string)
 	delete(config, "digest")

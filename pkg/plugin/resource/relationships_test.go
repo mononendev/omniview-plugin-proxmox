@@ -2,7 +2,6 @@ package resource
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -10,14 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
 
 // TestDeclaredEdgesResolveToListedResources reads every declared extractor
-// field path from the listed objects, as the host's graph indexer does, and
-// checks each extracted ID is the ID of a listed resource of the target kind.
+// field path from the enumerated bodies, as the host's graph indexer does,
+// and checks each extracted ID is the ID of an enumerated resource of the
+// target type.
 func TestDeclaredEdgesResolveToListedResources(t *testing.T) {
 	byType := map[string]string{
 		"node": `[{"id":"node/pve1","type":"node","node":"pve1"},{"id":"node/pve2","type":"node","node":"pve2"}]`,
@@ -52,35 +52,36 @@ func TestDeclaredEdgesResolveToListedResources(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kinds := map[string]*listResourcer{
-		metaNode.Key():      clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node"),
-		metaStorage.Key():   clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage"),
-		metaVM.Key():        clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu"),
-		metaContainer.Key(): clusterKind(metaContainer, "container", proxmox.ResourceTypeVM, "lxc"),
-	}
+	p := &provider{}
 	objects := map[string]map[string]map[string]any{}
-	for key, r := range kinds {
-		list, err := r.List(context.Background(), client, sdkresource.ResourceMeta{}, sdkresource.ListInput{})
+	for _, k := range staticKinds {
+		page, err := k.enumerate(context.Background(), client, resourcev2.EnumerateRequest{
+			Target: resourcev2.ReadTarget{Provider: providerID, Authority: "a", Type: k.typ, Representation: representationID},
+		})
 		if err != nil {
-			t.Fatalf("list %s: %v", key, err)
+			t.Fatalf("enumerate %s: %v", k.typ, err)
 		}
-		objects[key] = map[string]map[string]any{}
-		for _, raw := range list.Result {
-			var obj map[string]any
-			if err := json.Unmarshal(raw, &obj); err != nil {
+		objects[k.typ] = map[string]map[string]any{}
+		for _, rec := range page.Records {
+			native, err := resourcev2.NativeFromValue(rec.Body)
+			if err != nil {
 				t.Fatal(err)
 			}
-			objects[key][obj["id"].(string)] = obj
+			objects[k.typ][rec.Reference.Address.ID] = native.(map[string]any)
 		}
 	}
 
 	got := map[string][]string{}
-	for key, r := range kinds {
-		for _, decl := range r.DeclareRelationships() {
-			for id, obj := range objects[key] {
+	for _, k := range staticKinds {
+		decls, err := p.GetRelationships(context.Background(), resourcev2.AccessRoute{Connection: "c"}, k.typ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range decls {
+			for id, obj := range objects[k.typ] {
 				for _, target := range fieldPathValues(obj, decl.Extractor.FieldPath) {
-					if _, ok := objects[decl.TargetResourceKey][target]; !ok {
-						t.Errorf("%s %s: %s edge to %q, which is not a listed %s", key, id, decl.Type, target, decl.TargetResourceKey)
+					if _, ok := objects[decl.TargetType][target]; !ok {
+						t.Errorf("%s %s: %s edge to %q, which is not a listed %s", k.typ, id, decl.Type, target, decl.TargetType)
 					}
 					got[id] = append(got[id], string(decl.Type)+" "+target)
 				}

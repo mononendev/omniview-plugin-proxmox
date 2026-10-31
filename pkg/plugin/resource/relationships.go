@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
@@ -28,36 +28,25 @@ type refs struct {
 	Storage *[]string `json:"storage,omitempty"`
 }
 
-var notNamespaced = false
+// relationship declares an edge read from a refsField path. Targets have no
+// identity dimensions, so no target scope is needed.
+func relationship(typ resourcev2.RelationshipType, target, label, inverse, cardinality, path string) resourcev2.RelationshipDescriptor {
+	return resourcev2.RelationshipDescriptor{
+		Type:            typ,
+		TargetType:      target,
+		Label:           label,
+		InverseLabel:    inverse,
+		Cardinality:     cardinality,
+		Extractor:       &resourcev2.RelationshipExtractor{Method: "fieldPath", FieldPath: refsField + "." + path},
+		TargetScope:     []resourcev2.ScopeEntry{},
+		ScopeExtractors: []resourcev2.ScopeExtractor{},
+	}
+}
 
 var (
-	relGuestNode = sdkresource.RelationshipDescriptor{
-		Type:              sdkresource.RelRunsOn,
-		TargetResourceKey: metaNode.Key(),
-		Label:             "runs on",
-		InverseLabel:      "runs",
-		Cardinality:       "many-to-one",
-		Extractor:         &sdkresource.RelationshipExtractor{Method: "fieldPath", FieldPath: refsField + ".node"},
-		TargetNamespaced:  &notNamespaced,
-	}
-	relGuestStorage = sdkresource.RelationshipDescriptor{
-		Type:              sdkresource.RelUses,
-		TargetResourceKey: metaStorage.Key(),
-		Label:             "uses storage",
-		InverseLabel:      "used by",
-		Cardinality:       "many-to-many",
-		Extractor:         &sdkresource.RelationshipExtractor{Method: "fieldPath", FieldPath: refsField + ".storage"},
-		TargetNamespaced:  &notNamespaced,
-	}
-	relStorageNode = sdkresource.RelationshipDescriptor{
-		Type:              sdkresource.RelRunsOn,
-		TargetResourceKey: metaNode.Key(),
-		Label:             "attached to",
-		InverseLabel:      "has storage",
-		Cardinality:       "many-to-one",
-		Extractor:         &sdkresource.RelationshipExtractor{Method: "fieldPath", FieldPath: refsField + ".node"},
-		TargetNamespaced:  &notNamespaced,
-	}
+	relGuestNode    = relationship(resourcev2.RelRunsOn, typeNode, "runs on", "runs", "many-to-one", "node")
+	relGuestStorage = relationship(resourcev2.RelUses, typeStorage, "uses storage", "used by", "many-to-many", "storage")
+	relStorageNode  = relationship(resourcev2.RelRunsOn, typeNode, "attached to", "has storage", "many-to-one", "node")
 )
 
 // relationshipsOf returns the edges the host indexes from refsField for one
@@ -65,19 +54,41 @@ var (
 // storage entries are attached to a node. Storage points at its node, like
 // guests do, so a node's upstream neighbourhood holds its guests, its
 // storage and the edges between them.
-func relationshipsOf(entryType string) []sdkresource.RelationshipDescriptor {
+func relationshipsOf(entryType string) []resourcev2.RelationshipDescriptor {
 	switch entryType {
 	case "qemu", "lxc":
-		return []sdkresource.RelationshipDescriptor{relGuestNode, relGuestStorage}
+		return []resourcev2.RelationshipDescriptor{relGuestNode, relGuestStorage}
 	case "storage":
-		return []sdkresource.RelationshipDescriptor{relStorageNode}
+		return []resourcev2.RelationshipDescriptor{relStorageNode}
 	default:
 		return nil
 	}
 }
 
-func (r *listResourcer) DeclareRelationships() []sdkresource.RelationshipDescriptor {
-	return r.relationships
+// GetRelationships declares the edges of one type; the host extracts them
+// from the bodies it receives.
+func (p *provider) GetRelationships(
+	ctx context.Context,
+	_ resourcev2.AccessRoute,
+	typ string,
+) ([]resourcev2.RelationshipDescriptor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, k := range append(append([]*kind{}, staticKinds...), cephKinds...) {
+		if k.typ == typ {
+			return append([]resourcev2.RelationshipDescriptor(nil), k.relationships...), nil
+		}
+	}
+	return nil, resourcev2.NewError("NOT_FOUND", "Unknown Proxmox resource type.")
+}
+
+// ResolveRelationships is unsupported: every edge is declared for extraction.
+func (p *provider) ResolveRelationships(
+	context.Context,
+	resourcev2.RelationshipResolutionRequest,
+) ([]resourcev2.ResolvedRelationship, error) {
+	return nil, resourcev2.NewError("UNSUPPORTED", "Proxmox relationships are extracted from resource bodies.")
 }
 
 // addRefs writes refsField into each entry of the types that declare

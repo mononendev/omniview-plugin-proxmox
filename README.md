@@ -5,6 +5,9 @@ containers and the cluster's Ceph (status, pools, OSDs, monitors, managers, meta
 CephFS). Guests can be started, shut down, stopped, rebooted, edited and destroyed; nodes and guests
 have metrics and shells; nodes and Ceph daemons have logs. See [Operations](#operations).
 
+Requires Omniview 0.11 or later: the plugin is built on plugin-sdk 0.9 (resource API v2) and
+`@omniviewdev/runtime` 0.11.
+
 ## Setup
 
 The plugin talks to the Proxmox VE API with an API token. One API endpoint serves the whole
@@ -123,7 +126,7 @@ pveum user delete omniview@pve
 
 ## Resources
 
-| Resource key | Source |
+| Resource type | Source |
 | --- | --- |
 | `proxmox::v1::Node` | `GET /cluster/resources?type=node` |
 | `proxmox::v1::Storage` | `GET /cluster/resources?type=storage` |
@@ -139,9 +142,15 @@ pveum user delete omniview@pve
 
 Objects are the API entries, plus an `omniview` object on guests and storage (see
 [Relationships](#relationships)). Cluster resources are identified by Proxmox's cluster-unique `id`
-(`node/pve1`, `qemu/100`, `storage/pve1/local`); nodes are not mapped onto namespaces. Ceph objects
-have no such `id` and are identified by their Ceph name: the cluster `fsid`, `pool_name`, or `name`
-(`osd.3`, monitor/manager/MDS IDs, file system name).
+(`node/pve1`, `qemu/100`, `storage/pve1/local`); the types have no scope dimensions (nodes are not
+mapped onto namespaces). Ceph objects have no such `id` and are identified by their Ceph name: the
+cluster `fsid`, `pool_name`, or `name` (`osd.3`, monitor/manager/MDS IDs, file system name).
+Integers keep their exact value end to end.
+
+Connecting checks the API token (`GET /version`) and asks for `ceph status`; a rejected token or an
+unreachable API fails the connection. The connection's catalog lists the four cluster types, plus
+the Ceph types when an online node answered `ceph status`, so a cluster without Ceph has no Ceph
+section. Ceph installed later shows up on the next connect.
 
 Ceph state is cluster-wide but Proxmox serves it only from nodes with Ceph installed. A Ceph
 request goes to the node that answered the previous one, falling back to every other online node
@@ -153,13 +162,17 @@ their detail, raw capacity, monitors in quorum, managers, OSDs up/in, metadata s
 group states and client I/O. The JSON view keeps the full monitor and manager maps.
 
 Proxmox has no change feed, so while a connection is open each kind is re-read every 10 seconds
-and changes are pushed to the UI as watch events. Cluster kinds are watched from connect; a Ceph
-kind from the first time its view is opened (Ceph status also from the first Summary page of a
-cluster with Ceph). An unreachable cluster shows as a watch error and
-recovers on the next successful poll.
+and changes are pushed to the UI as best-effort updates. Cluster kinds are watched from connect; a
+Ceph kind from the first time its view is opened (Ceph status also from the first Summary page of a
+cluster with Ceph). An unreachable cluster shows as a watch error and recovers on the next
+successful poll.
 
-Table columns are defined in `ui/src/utils/columns.ts`. The resource transport has no RPC that
-delivers a backend `ResourceDefinition` to the UI, so the backend registers none.
+A type is read in pages of up to 256 objects, sorted by ID. Tables page through them; the Summary
+page, Topology and the home page card use the first page of each kind and say so when a kind has
+more.
+
+Table columns are defined in `ui/src/utils/columns.ts`; the backend supplies no presentation
+metadata.
 
 ## Relationships
 

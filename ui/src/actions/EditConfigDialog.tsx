@@ -12,13 +12,12 @@ import {
   Text,
   TextArea,
 } from '@omniviewdev/base-ui';
-import { parseAppError } from '@omniviewdev/runtime';
+import { jsonToValue, parseAppError, valueToJSON } from '@omniviewdev/runtime';
 import { ResourceClient } from '@omniviewdev/runtime/api';
-import { ActionInput } from '@omniviewdev/runtime/models';
 import { LuChevronDown, LuSettings2 } from 'react-icons/lu';
 
 import { PLUGIN_ID } from '../constants';
-import type { ActionTarget } from './actionDeps';
+import type { ActionTarget, MutateResource } from './actionDeps';
 import {
   type ConfigField,
   type ConfigValues,
@@ -37,15 +36,9 @@ const fullWidthStyle = { width: '100%' } as const;
 
 type Loaded = { values: ConfigValues; digest: string };
 
-/** Runtime `useResourceMutations().update`: `input.input` holds the changed config keys and the digest. */
-export type UpdateGuestConfig = (args: {
-  opts: { connectionID: string; resourceKey: string; resourceID: string };
-  input: { input: Record<string, unknown> };
-}) => Promise<unknown>;
-
 type Props = {
   target: ActionTarget;
-  update: UpdateGuestConfig;
+  mutate: MutateResource;
   onClose: () => void;
 };
 
@@ -55,7 +48,7 @@ type Props = {
  * (`''` deletes a key) with the config digest, so a concurrent edit is
  * rejected instead of overwritten.
  */
-export default function EditConfigDialog({ target, update, onClose }: Props) {
+export default function EditConfigDialog({ target, mutate, onClose }: Props) {
   const fields = useMemo(() => configFields(target.resourceKey), [target.resourceKey]);
   const [loaded, setLoaded] = useState<Loaded>();
   const [loadError, setLoadError] = useState<string>();
@@ -64,20 +57,21 @@ export default function EditConfigDialog({ target, update, onClose }: Props) {
   const [submitError, setSubmitError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
+  const { route, record } = target.record;
   useEffect(() => {
     let cancelled = false;
-    ResourceClient.ExecuteAction(
-      PLUGIN_ID,
-      target.connectionID,
-      target.resourceKey,
-      'config',
-      ActionInput.createFrom({ id: target.id, namespace: '', params: {} }),
-    )
+    // The client, not the runtime hook: a failure shows in the dialog, not as a notification too.
+    ResourceClient.Action(PLUGIN_ID, {
+      route,
+      reference: record.reference,
+      action: 'config',
+      input: { kind: 'map', value: {} },
+    })
       .then((result) => {
         if (cancelled) return;
-        const config = (result?.data?.config ?? {}) as Record<string, unknown>;
-        const initial = initialValues(fields, config);
-        setLoaded({ values: initial, digest: String(result?.data?.digest ?? '') });
+        const { config, digest } = valueToJSON(result) as { config?: Record<string, unknown>; digest?: string };
+        const initial = initialValues(fields, config ?? {});
+        setLoaded({ values: initial, digest: digest ?? '' });
         setValues(initial);
       })
       .catch((error: unknown) => {
@@ -86,7 +80,7 @@ export default function EditConfigDialog({ target, update, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [target.connectionID, target.resourceKey, target.id, fields]);
+  }, [route, record.reference, fields]);
 
   const localErrors = useMemo(() => validate(fields, values), [fields, values]);
   const changes = useMemo(
@@ -108,10 +102,7 @@ export default function EditConfigDialog({ target, update, onClose }: Props) {
     try {
       const input: Record<string, unknown> = { ...changes };
       if (loaded.digest) input.digest = loaded.digest;
-      await update({
-        opts: { connectionID: target.connectionID, resourceKey: target.resourceKey, resourceID: target.id },
-        input: { input },
-      });
+      await mutate({ route, reference: record.reference, operation: 'update', input: jsonToValue(input) });
       onClose();
     } catch (error) {
       // The runtime already showed the error notification; keep the details next to the fields.

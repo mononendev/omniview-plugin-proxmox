@@ -1,51 +1,36 @@
 import { useState } from 'react';
-import { useConnection, usePluginRouter, useSnackbar } from '@omniviewdev/runtime';
-import { types } from '@omniviewdev/runtime/models';
+import { useConnection, usePluginRouter } from '@omniviewdev/runtime';
 
 import { PLUGIN_ID, connectionPath } from '../constants';
 
 /**
  * Connect/disconnect/open actions for one Proxmox connection. `isConnected`
  * comes from the caller's single `useConnectionStatus()` subscription.
+ * Starting checks the API token, so a rejected token or an unreachable API
+ * fails the start; the runtime reports start and stop failures.
  */
-export function useProxmoxConnection(connectionId: string, displayName: string, isConnected: boolean) {
+export function useProxmoxConnection(connectionId: string, isConnected: boolean) {
   const { navigate } = usePluginRouter();
-  const { showSnackbar } = useSnackbar();
   const { startConnection, stopConnection } = useConnection({
     pluginID: PLUGIN_ID,
     connectionID: connectionId,
   });
   const [pending, setPending] = useState(false);
 
-  const reportError = (message: string) => (err: unknown) => {
-    showSnackbar({ status: 'error', message, details: err instanceof Error ? err.message : String(err) });
-  };
-
   const connect = (openOnSuccess: boolean) => {
     setPending(true);
     startConnection()
-      .then((status) => {
-        if (status.status === types.ConnectionStatusCode.ConnectionStatusConnected) {
-          if (openOnSuccess) navigate(connectionPath(connectionId));
-          return;
-        }
-        const unauthorized = status.status === types.ConnectionStatusCode.ConnectionStatusUnauthorized;
-        showSnackbar({
-          status: unauthorized ? 'warning' : 'error',
-          message: unauthorized
-            ? `Proxmox rejected the API token for '${displayName}'`
-            : `Failed to connect to '${displayName}'`,
-          details: status.details || status.error,
-        });
+      .then(() => {
+        if (openOnSuccess) navigate(connectionPath(connectionId));
       })
-      .catch(reportError(`Failed to connect to '${displayName}'`))
+      .catch(() => undefined)
       .finally(() => setPending(false));
   };
 
   const disconnect = () => {
     setPending(true);
     stopConnection()
-      .catch(reportError(`Failed to disconnect '${displayName}'`))
+      .catch(() => undefined)
       .finally(() => setPending(false));
   };
 

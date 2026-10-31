@@ -21,7 +21,9 @@ type ProxmoxConnectionData = {
 export default function ConnectionsPage() {
   const { connections } = useConnections({ plugin: PLUGIN_ID });
   const { entries } = useConnectionStatus();
-  const started = new Set(entries.filter((e) => e.pluginID === PLUGIN_ID).map((e) => e.connectionID));
+  const started = new Set(
+    entries.filter((e) => e.pluginID === PLUGIN_ID && e.readiness === 'CONNECTED').map((e) => e.connectionID),
+  );
   const list = [...(connections.data ?? [])].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
 
   let body;
@@ -86,7 +88,7 @@ export default function ConnectionsPage() {
 function ConnectionRow({ connection, isConnected }: { connection: types.Connection; isConnected: boolean }) {
   const name = connection.name || connection.id;
   const data = connection.data as ProxmoxConnectionData;
-  const { pending, open, connect, disconnect } = useProxmoxConnection(connection.id, name, isConnected);
+  const { pending, open, connect, disconnect } = useProxmoxConnection(connection.id, isConnected);
 
   return (
     <Table.Row interactive onClick={pending ? undefined : open}>

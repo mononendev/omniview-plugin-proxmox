@@ -1,8 +1,8 @@
 import { type ReactNode, useEffect } from 'react';
-import { type DrawerComponent, type DrawerContext, useResources, useRightDrawer } from '@omniviewdev/runtime';
+import { type DrawerComponent, type DrawerContext, useRightDrawer } from '@omniviewdev/runtime';
 
-import { PLUGIN_ID } from '../constants';
-import { type NativeObject, displayName, kindFor, objectId } from '../utils/columns';
+import { drawerContextOf, useProxmoxResources } from '../hooks/useProxmoxResources';
+import { type NativeObject, displayName, kindFor } from '../utils/columns';
 import { bindActionDeps } from './actionDeps';
 import { useActionExecution } from './useActionExecution';
 
@@ -21,17 +21,13 @@ type Props = {
  */
 export default function DrawerActionsBridge({ ctx, drawer, live, children }: Props) {
   const { closeDrawer } = useRightDrawer();
-  const { deps, dialogs } = useActionExecution({
-    connectionID: ctx.resource?.connectionID ?? '',
-    resourceKey: ctx.resource?.key ?? '',
-    onDeleted: closeDrawer,
-  });
+  const { deps, dialogs } = useActionExecution({ onDeleted: closeDrawer });
   // The host calls header actions with this same context object.
   bindActionDeps(ctx, deps);
 
   return (
     <>
-      {live && <LiveData ctx={ctx} drawer={drawer} />}
+      {live && ctx.resource && <LiveData ctx={ctx} drawer={drawer} />}
       {children}
       {dialogs}
     </>
@@ -45,24 +41,19 @@ export default function DrawerActionsBridge({ ctx, drawer, live, children }: Pro
  */
 function LiveData({ ctx, drawer }: { ctx: DrawerContext<NativeObject>; drawer: DrawerComponent<NativeObject> }) {
   const { openDrawer, isOpen } = useRightDrawer();
-  const resourceKey = ctx.resource?.key ?? '';
-  const kind = kindFor(resourceKey);
-  const { resources } = useResources({
-    pluginID: PLUGIN_ID,
-    connectionID: ctx.resource?.connectionID ?? '',
-    resourceKey,
-    idAccessor: kind.idField,
-  });
+  const { reference, route } = ctx.resource!;
+  const { type, id } = reference.address;
+  const { entries } = useProxmoxResources(route.connection, type);
 
   useEffect(() => {
-    if (!isOpen || !ctx.resource || !resources.data) return;
-    const id = ctx.resource.id;
-    const fresh = ((resources.data.result ?? []) as NativeObject[]).find((row) => objectId(row, kind) === id);
-    if (!fresh || JSON.stringify(fresh) === JSON.stringify(ctx.data)) return;
+    if (!isOpen) return;
+    const fresh = entries.find((entry) => entry.id === id);
+    // Tagged bodies compare exactly and, unlike decoded ones, never hold a bigint.
+    if (!fresh || JSON.stringify(fresh.record.record.body) === JSON.stringify(ctx.resource?.record?.record.body)) return;
     // A rename shows in the title and in the dialogs' target name too.
-    const name = displayName(fresh, kind);
-    openDrawer({ ...drawer, title: name }, { ...ctx, data: fresh, resource: { ...ctx.resource, name } });
-  }, [isOpen, resources.data, ctx, kind, drawer, openDrawer]);
+    const name = displayName(fresh.data, kindFor(type));
+    openDrawer({ ...drawer, title: name }, drawerContextOf(fresh, name));
+  }, [isOpen, entries, id, type, ctx.resource, drawer, openDrawer]);
 
   return null;
 }

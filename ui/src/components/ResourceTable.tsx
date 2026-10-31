@@ -13,14 +13,15 @@ import {
   useSortableTable,
   type SortableColumnDef,
 } from '@omniviewdev/base-ui';
-import { type DrawerContext, ResourceIcon, useResources, useRightDrawer } from '@omniviewdev/runtime';
-import { LuCircleAlert, LuRefreshCw } from 'react-icons/lu';
+import { type DrawerContext, ResourceIcon, useRightDrawer } from '@omniviewdev/runtime';
+import { LuChevronLeft, LuChevronRight, LuCircleAlert, LuRefreshCw } from 'react-icons/lu';
 
 import { bindActionDeps } from '../actions/actionDeps';
 import { resourceActions } from '../actions/resourceActions';
 import { useActionExecution } from '../actions/useActionExecution';
-import { PLUGIN_ID } from '../constants';
+import { PAGE_SIZE, PLUGIN_ID } from '../constants';
 import { useOpenResource } from '../hooks/useOpenResource';
+import { type ProxmoxEntry, drawerContextOf, useProxmoxResources } from '../hooks/useProxmoxResources';
 import { RowActionsButton, RowContextMenuPopup, menuEntries } from './RowActions';
 import {
   type Column,
@@ -32,7 +33,6 @@ import {
   formatValue,
   isNumeric,
   kindFor,
-  objectId,
   sortValue,
 } from '../utils/columns';
 
@@ -50,39 +50,35 @@ type Props = {
 };
 
 /**
- * Table for one Proxmox resource kind. Rows are the raw native objects keyed
- * by the kind's ID field; columns come from kindFor().
+ * Table for one Proxmox resource kind, one page of PAGE_SIZE objects at a
+ * time. Rows are the decoded native objects; columns come from kindFor().
  */
 export default function ResourceTable({ connectionId, resourceKey, label }: Props) {
   const [filter, setFilter] = useState('');
+  // Cursors of the pages before the shown one; the last one is the shown page's.
+  const [cursors, setCursors] = useState<string[]>([]);
   const kind = kindFor(resourceKey);
 
-  const { resources } = useResources({
-    pluginID: PLUGIN_ID,
-    connectionID: connectionId,
-    resourceKey,
-    idAccessor: kind.idField,
-  });
+  const resources = useProxmoxResources(connectionId, resourceKey, { cursor: cursors.at(-1) });
   const rows = useMemo(() => {
-    const all = (resources.data?.result ?? []) as NativeObject[];
     const needle = filter.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter(
-      (row) =>
-        objectId(row, kind).toLowerCase().includes(needle) ||
-        kind.columns.some((col) => formatValue(cellValue(row, col), col).toLowerCase().includes(needle)),
+    if (!needle) return resources.entries;
+    return resources.entries.filter(
+      (entry) =>
+        entry.id.toLowerCase().includes(needle) ||
+        kind.columns.some((col) => formatValue(cellValue(entry.data, col), col).toLowerCase().includes(needle)),
     );
-  }, [resources.data, filter, kind]);
+  }, [resources.entries, filter, kind]);
+
+  const paged = cursors.length > 0 || resources.nextCursor !== undefined;
+  const first = cursors.length * PAGE_SIZE;
+  const pageLabel = `${first + 1}–${first + resources.entries.length}${resources.total === undefined ? '' : ` of ${resources.total}`}`;
 
   let body;
   if (resources.error) {
     body = (
       <div style={centerStyle}>
-        <EmptyState
-          icon={<LuCircleAlert />}
-          title={`Failed to load ${label.toLowerCase()}`}
-          description={resources.error.message}
-        />
+        <EmptyState icon={<LuCircleAlert />} title={`Failed to load ${label.toLowerCase()}`} description={resources.error} />
       </div>
     );
   } else if (resources.isLoading) {
@@ -102,7 +98,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
     );
   } else {
     // Kept mounted while filtering so the chosen sort survives an empty result.
-    body = <SortedTable connectionId={connectionId} resourceKey={resourceKey} kind={kind} rows={rows} />;
+    body = <SortedTable resourceKey={resourceKey} kind={kind} rows={rows} />;
   }
 
   return (
@@ -113,7 +109,7 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
           <Text weight="semibold">{label}</Text>
           {!resources.isLoading && !resources.error && (
             <Text size="sm" tone="muted">
-              {rows.length}
+              {paged ? pageLabel : rows.length}
             </Text>
           )}
         </Stack>
@@ -125,13 +121,34 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
             onValueChange={setFilter}
             clearable
           />
-          <IconButton
-            size="sm"
-            variant="ghost"
-            color="neutral"
-            aria-label="Refresh"
-            onClick={() => void resources.refetch()}
-          >
+          {paged && (
+            <>
+              <IconButton
+                size="sm"
+                variant="ghost"
+                color="neutral"
+                aria-label="Previous page"
+                disabled={cursors.length === 0}
+                onClick={() => setCursors((prev) => prev.slice(0, -1))}
+              >
+                <LuChevronLeft />
+              </IconButton>
+              <IconButton
+                size="sm"
+                variant="ghost"
+                color="neutral"
+                aria-label="Next page"
+                disabled={resources.nextCursor === undefined || !resources.isCurrent}
+                onClick={() => {
+                  const next = resources.nextCursor;
+                  if (next !== undefined) setCursors((prev) => [...prev, next]);
+                }}
+              >
+                <LuChevronRight />
+              </IconButton>
+            </>
+          )}
+          <IconButton size="sm" variant="ghost" color="neutral" aria-label="Refresh" onClick={resources.refresh}>
             <LuRefreshCw />
           </IconButton>
         </Stack>
@@ -142,27 +159,26 @@ export default function ResourceTable({ connectionId, resourceKey, label }: Prop
 }
 
 type SortedTableProps = {
-  connectionId: string;
   resourceKey: string;
   kind: Kind;
-  rows: NativeObject[];
+  rows: ProxmoxEntry[];
 };
 
-function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps) {
+function SortedTable({ resourceKey, kind, rows }: SortedTableProps) {
   const { isOpen } = useRightDrawer();
-  const open = useOpenResource(connectionId);
+  const open = useOpenResource();
   const [selectedId, setSelectedId] = useState<string>();
   const [menuRowId, setMenuRowId] = useState<string>();
   const { columns } = kind;
   const actions = resourceActions(resourceKey);
-  const { deps, dialogs } = useActionExecution({ connectionID: connectionId, resourceKey });
+  const { deps, dialogs } = useActionExecution();
 
-  const sortColumns = useMemo<Array<SortableColumnDef<NativeObject>>>(
+  const sortColumns = useMemo<Array<SortableColumnDef<ProxmoxEntry>>>(
     () =>
       columns.map((col) => ({
         id: col.field,
         header: col.header,
-        accessor: (row) => sortValue(cellValue(row, col)),
+        accessor: (row) => sortValue(cellValue(row.data, col)),
       })),
     [columns],
   );
@@ -172,35 +188,29 @@ function SortedTable({ connectionId, resourceKey, kind, rows }: SortedTableProps
   const contexts = useMemo(() => {
     const byId = new Map<string, DrawerContext<NativeObject>>();
     for (const row of rows) {
-      const id = objectId(row, kind);
-      const ctx = {
-        data: row,
-        resource: { id, name: displayName(row, kind), key: resourceKey, connectionID: connectionId, pluginID: PLUGIN_ID },
-      };
-      byId.set(id, bindActionDeps(ctx, deps));
+      byId.set(row.id, bindActionDeps(drawerContextOf(row, displayName(row.data, kind)), deps));
     }
     return byId;
-  }, [rows, kind, resourceKey, connectionId, deps]);
+  }, [rows, kind, deps]);
 
-  const openResource = (row: NativeObject) => {
-    setSelectedId(objectId(row, kind));
-    open(resourceKey, row);
+  const openResource = (row: ProxmoxEntry) => {
+    setSelectedId(row.id);
+    open(row);
   };
 
   const hasActions = actions.length > 0;
   const tableRows = sortedData.map((row) => {
-    const id = objectId(row, kind);
-    const ctx = contexts.get(id);
+    const ctx = contexts.get(row.id);
     return (
       <Table.Row
-        key={id}
+        key={row.id}
         interactive
-        selected={isOpen && id === selectedId}
+        selected={isOpen && row.id === selectedId}
         onClick={() => openResource(row)}
-        onContextMenu={hasActions ? () => setMenuRowId(id) : undefined}
+        onContextMenu={hasActions ? () => setMenuRowId(row.id) : undefined}
       >
         {columns.map((col) => (
-          <ResourceCell key={col.field} row={row} col={col} />
+          <ResourceCell key={col.field} row={row.data} col={col} />
         ))}
         {hasActions && (
           <Table.Cell align="right" style={actionsCellStyle}>
