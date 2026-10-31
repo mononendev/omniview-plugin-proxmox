@@ -2,7 +2,6 @@ package resource
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
@@ -75,32 +74,73 @@ func (f *fakePVE) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var ctx = context.Background()
 
-func opError(t *testing.T, r *guestResourcer, err error) *sdkresource.ResourceOperationError {
+var (
+	vms = guestKind(typeVM, "Virtual Machines", "virtual machine", "qemu")
+	cts = guestKind(typeContainer, "Containers", "container", "lxc")
+)
+
+func opError(t *testing.T, k *kind, err error) *resourcev2.ResourceOperationError {
 	t.Helper()
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	var opErr *sdkresource.ResourceOperationError
-	if !errors.As(r.ClassifyError(err), &opErr) {
+	var opErr *resourcev2.ResourceOperationError
+	if !errors.As(k.ClassifyError(err), &opErr) {
 		t.Fatalf("not classified: %v", err)
 	}
 	return opErr
 }
 
-func TestOnlyGuestKindsHaveActions(t *testing.T) {
-	var node sdkresource.Resourcer[proxmox.Client] = clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node")
-	if _, ok := node.(sdkresource.ActionResourcer[proxmox.Client]); ok {
-		t.Fatal("node kind must not advertise actions")
+func ref(typ, id string) resourcev2.ResourceReference {
+	return reference(providerID, "test-authority", typ, id)
+}
+
+func act(k *kind, client *proxmox.Client, action, id string) (map[string]any, error) {
+	v, err := k.action(ctx, client, resourcev2.ActionRequest{
+		Route: resourcev2.AccessRoute{Connection: "c"}, Reference: ref(k.typ, id), Action: action,
+	})
+	if err != nil {
+		return nil, err
+	}
+	native, err := resourcev2.NativeFromValue(v)
+	if err != nil {
+		return nil, err
+	}
+	return native.(map[string]any), nil
+}
+
+func mutate(k *kind, client *proxmox.Client, op, id string, input map[string]any) (resourcev2.Record, error) {
+	in, err := resourcev2.ValueFromNative(input)
+	if err != nil {
+		return resourcev2.Record{}, err
+	}
+	return k.mutate(ctx, client, resourcev2.MutationRequest{
+		Route: resourcev2.AccessRoute{Connection: "c"}, Reference: ref(k.typ, id), Operation: op, Input: in,
+	})
+}
+
+func TestOnlyGuestKindsHaveActionsAndWrites(t *testing.T) {
+	for _, k := range append(append([]*kind{}, staticKinds...), cephKinds...) {
+		r := k.registration()
+		guest := k.typ == typeVM || k.typ == typeContainer
+		if (r.Action != nil) != guest || (r.Mutate != nil) != guest {
+			t.Errorf("%s: action/mutate registered = %v/%v, want %v", k.typ, r.Action != nil, r.Mutate != nil, guest)
+		}
+		var declared []resourcev2.Operation
+		for _, c := range k.resourceType().Capabilities {
+			declared = append(declared, c.Operation)
+		}
+		for _, op := range []resourcev2.Operation{resourcev2.OperationAction, resourcev2.OperationMutationUpdate, resourcev2.OperationDelete} {
+			if hasOp := containsOp(declared, op); hasOp != guest {
+				t.Errorf("%s: declares %s = %v, want %v", k.typ, op, hasOp, guest)
+			}
+		}
 	}
 
-	ids := func(r *guestResourcer) []string {
-		actions, err := r.GetActions(ctx, nil, sdkresource.ResourceMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+	ids := func(k *kind) string {
 		var out []string
-		for _, a := range actions {
-			if a.Scope != sdkresource.ActionScopeInstance {
+		for _, a := range k.actionDescriptors() {
+			if a.Scope != resourcev2.ActionScopeInstance {
 				t.Fatalf("%s: scope %q", a.ID, a.Scope)
 			}
 			if a.Dangerous != (a.ID == "stop") {
@@ -108,24 +148,30 @@ func TestOnlyGuestKindsHaveActions(t *testing.T) {
 			}
 			out = append(out, a.ID)
 		}
-		return out
+		return strings.Join(out, ",")
 	}
-	vm := strings.Join(ids(guestKind(metaVM, "virtual machine", "qemu")), ",")
-	ct := strings.Join(ids(guestKind(metaContainer, "container", "lxc")), ",")
-	if vm != "start,shutdown,reboot,stop,suspend,resume,config" || ct != "start,shutdown,reboot,stop,config" {
+	if vm, ct := ids(vms), ids(cts); vm != "start,shutdown,reboot,stop,suspend,resume,config" || ct != "start,shutdown,reboot,stop,config" {
 		t.Fatalf("vm actions %s, container actions %s", vm, ct)
 	}
 }
 
+func containsOp(ops []resourcev2.Operation, op resourcev2.Operation) bool {
+	for _, o := range ops {
+		if o == op {
+			return true
+		}
+	}
+	return false
+}
+
 func TestLifecycleActionPostsAndWaitsForTask(t *testing.T) {
 	f, client := newFakePVE(t)
-	vms := guestKind(metaVM, "virtual machine", "qemu")
 
-	res, err := vms.ExecuteAction(ctx, client, metaVM, "start", sdkresource.ActionInput{ID: "qemu/100"})
+	res, err := act(vms, client, "start", "qemu/100")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Success || res.Message != "Started web01 (qemu/100)." {
+	if res["message"] != "Started web01 (qemu/100)." || res["upid"] != "UPID:pve2:00001:task" {
 		t.Fatalf("unexpected result %+v", res)
 	}
 	if len(f.writes) != 1 || f.writes[0].method != http.MethodPost || f.writes[0].path != "/nodes/pve2/qemu/100/status/start" {
@@ -133,7 +179,7 @@ func TestLifecycleActionPostsAndWaitsForTask(t *testing.T) {
 	}
 
 	f.exitStatus = "can't lock file '/var/lock/qemu-server/lock-100.conf' - got timeout"
-	_, err = vms.ExecuteAction(ctx, client, metaVM, "stop", sdkresource.ActionInput{ID: "qemu/100"})
+	_, err = act(vms, client, "stop", "qemu/100")
 	opErr := opError(t, vms, err)
 	if opErr.Code != "PROVIDER_ERROR" || opErr.Title != "Task failed" || !strings.Contains(opErr.Message, "got timeout") {
 		t.Fatalf("unexpected error %+v", opErr)
@@ -150,25 +196,23 @@ func TestLifecycleActionStillRunningAfterBound(t *testing.T) {
 	defer func(d time.Duration) { taskWaitBound = d }(taskWaitBound)
 	taskWaitBound = 50 * time.Millisecond
 
-	vms := guestKind(metaVM, "virtual machine", "qemu")
-	res, err := vms.ExecuteAction(ctx, client, metaVM, "shutdown", sdkresource.ActionInput{ID: "qemu/100"})
+	res, err := act(vms, client, "shutdown", "qemu/100")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Success || !strings.Contains(res.Message, "still running") {
+	if msg, _ := res["message"].(string); !strings.Contains(msg, "still running") {
 		t.Fatalf("unexpected result %+v", res)
 	}
 }
 
 func TestActionRejectsOtherKindsAndUnknownActions(t *testing.T) {
 	_, client := newFakePVE(t)
-	cts := guestKind(metaContainer, "container", "lxc")
 
-	_, err := cts.ExecuteAction(ctx, client, metaContainer, "start", sdkresource.ActionInput{ID: "qemu/100"})
+	_, err := act(cts, client, "start", "qemu/100")
 	if opErr := opError(t, cts, err); opErr.Code != "NOT_FOUND" {
-		t.Fatalf("container resourcer acted on a VM: %+v", opErr)
+		t.Fatalf("container kind acted on a VM: %+v", opErr)
 	}
-	_, err = cts.ExecuteAction(ctx, client, metaContainer, "suspend", sdkresource.ActionInput{ID: "lxc/200"})
+	_, err = act(cts, client, "suspend", "lxc/200")
 	if opErr := opError(t, cts, err); opErr.Code != "UNSUPPORTED" {
 		t.Fatalf("container suspend: %+v", opErr)
 	}
@@ -176,14 +220,13 @@ func TestActionRejectsOtherKindsAndUnknownActions(t *testing.T) {
 
 func TestConfigActionReturnsConfigDigestAndNode(t *testing.T) {
 	_, client := newFakePVE(t)
-	vms := guestKind(metaVM, "virtual machine", "qemu")
 
-	res, err := vms.ExecuteAction(ctx, client, metaVM, "config", sdkresource.ActionInput{ID: "qemu/100"})
+	res, err := act(vms, client, "config", "qemu/100")
 	if err != nil {
 		t.Fatal(err)
 	}
-	config, _ := res.Data["config"].(map[string]any)
-	if !res.Success || res.Message != "" || res.Data["digest"] != "d1" || res.Data["node"] != "pve2" || config["cores"] != float64(2) {
+	config, _ := res["config"].(map[string]any)
+	if res["digest"] != "d1" || res["node"] != "pve2" || config["cores"] != int64(2) {
 		t.Fatalf("unexpected result %+v", res)
 	}
 	if _, ok := config["digest"]; ok {
@@ -193,39 +236,38 @@ func TestConfigActionReturnsConfigDigestAndNode(t *testing.T) {
 
 func TestDeleteDestroysGuestAndWaits(t *testing.T) {
 	f, client := newFakePVE(t)
-	vms := guestKind(metaVM, "virtual machine", "qemu")
 
-	res, err := vms.Delete(ctx, client, metaVM, sdkresource.DeleteInput{ID: "qemu/100"})
+	rec, err := mutate(vms, client, "delete", "qemu/100", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Success || !strings.Contains(string(res.Result), `"qemu/100"`) {
-		t.Fatalf("unexpected result %+v", res)
+	if rec.Reference.Address.ID != "qemu/100" || rec.Body.Map["name"].String != "web01" {
+		t.Fatalf("unexpected result %+v", rec)
 	}
 	w := f.writes[0]
 	if w.method != http.MethodDelete || w.path != "/nodes/pve2/qemu/100" ||
 		w.query.Get("purge") != "1" || w.query.Get("destroy-unreferenced-disks") != "1" {
 		t.Fatalf("unexpected delete %+v", w)
 	}
-
-	if _, err := clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node").Delete(ctx, client, metaNode, sdkresource.DeleteInput{ID: "node/pve1"}); err == nil {
-		t.Fatal("node delete must stay unsupported")
-	}
 }
 
 func TestUpdateEncodesChangesAndReturnsGuest(t *testing.T) {
 	f, client := newFakePVE(t)
 	f.writeBody = `{"data":null}`
-	cts := guestKind(metaContainer, "container", "lxc")
 
-	input := json.RawMessage(`{"cores":4,"memory":2048.5,"onboot":true,"protection":false,"hostname":"ct2",` +
-		`"description":"","tags":null,"digest":"d1"}`)
-	res, err := cts.Update(ctx, client, metaContainer, sdkresource.UpdateInput{ID: "lxc/200", Input: input})
+	input := map[string]any{
+		"cores": 4, "memory": 2048.5, "onboot": true, "protection": false, "hostname": "ct2",
+		"description": "", "tags": nil, "digest": "d1",
+	}
+	rec, err := mutate(cts, client, "update", "lxc/200", input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Success || !strings.Contains(string(res.Result), `"id":"lxc/200"`) || !strings.Contains(string(res.Result), refsField) {
-		t.Fatalf("unexpected result %s", res.Result)
+	if rec.Reference.Address.ID != "lxc/200" || rec.Body.Map["id"].String != "lxc/200" {
+		t.Fatalf("unexpected result %+v", rec)
+	}
+	if _, ok := rec.Body.Map[refsField]; !ok {
+		t.Fatalf("refreshed guest lacks %s: %+v", refsField, rec.Body.Map)
 	}
 	w := f.writes[0]
 	want := url.Values{
@@ -236,7 +278,7 @@ func TestUpdateEncodesChangesAndReturnsGuest(t *testing.T) {
 		t.Fatalf("unexpected update %s %s %v", w.method, w.path, w.form)
 	}
 
-	_, err = cts.Update(ctx, client, metaContainer, sdkresource.UpdateInput{ID: "lxc/200", Input: json.RawMessage(`{"net0":{"x":1}}`)})
+	_, err = mutate(cts, client, "update", "lxc/200", map[string]any{"net0": map[string]any{"x": 1}})
 	if opErr := opError(t, cts, err); opErr.Code != "INVALID_INPUT" {
 		t.Fatalf("nested value: %+v", opErr)
 	}
@@ -244,27 +286,26 @@ func TestUpdateEncodesChangesAndReturnsGuest(t *testing.T) {
 
 func TestWriteErrorsAreClassified(t *testing.T) {
 	f, client := newFakePVE(t)
-	vms := guestKind(metaVM, "virtual machine", "qemu")
 
 	f.writeCode, f.writeBody = http.StatusForbidden, `{"data":null}`
-	_, err := vms.ExecuteAction(ctx, client, metaVM, "reboot", sdkresource.ActionInput{ID: "qemu/100"})
+	_, err := act(vms, client, "reboot", "qemu/100")
 	opErr := opError(t, vms, err)
 	if opErr.Code != "FORBIDDEN" || !strings.Contains(opErr.Message, "VM.PowerMgmt") ||
 		len(opErr.Suggestions) != 1 || !strings.Contains(opErr.Suggestions[0], "PVEVMAdmin") {
 		t.Fatalf("reboot 403: %+v", opErr)
 	}
-	_, err = vms.Delete(ctx, client, metaVM, sdkresource.DeleteInput{ID: "qemu/100"})
+	_, err = mutate(vms, client, "delete", "qemu/100", map[string]any{})
 	if opErr := opError(t, vms, err); opErr.Code != "FORBIDDEN" || !strings.Contains(opErr.Message, "VM.Allocate") {
 		t.Fatalf("delete 403: %+v", opErr)
 	}
-	_, err = vms.Update(ctx, client, metaVM, sdkresource.UpdateInput{ID: "qemu/100", Input: json.RawMessage(`{"cores":2}`)})
+	_, err = mutate(vms, client, "update", "qemu/100", map[string]any{"cores": 2})
 	if opErr := opError(t, vms, err); opErr.Code != "FORBIDDEN" || !strings.Contains(opErr.Message, "VM.Config.") {
 		t.Fatalf("update 403: %+v", opErr)
 	}
 
 	f.writeCode = http.StatusBadRequest
 	f.writeBody = `{"data":null,"errors":{"cores":"value must have a minimum value of 1","memory":"invalid format"}}`
-	_, err = vms.Update(ctx, client, metaVM, sdkresource.UpdateInput{ID: "qemu/100", Input: json.RawMessage(`{"cores":0}`)})
+	_, err = mutate(vms, client, "update", "qemu/100", map[string]any{"cores": 0})
 	opErr = opError(t, vms, err)
 	want := "Proxmox rejected the request (Bad Request)\ncores: value must have a minimum value of 1\nmemory: invalid format"
 	if opErr.Code != "INVALID_INPUT" || opErr.Message != want {

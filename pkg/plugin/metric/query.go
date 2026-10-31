@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -140,7 +141,7 @@ type target struct {
 // /cluster/resources entry), falling back to the resource ID ("node/apollo",
 // "qemu/100") and, for guests without a node, a /cluster/resources lookup.
 func resolveTarget(ctx context.Context, client *proxmox.Client, k kind, req sdkmetric.QueryRequest) (target, error) {
-	data := req.ResourceData
+	data := proxmox.ResourceData(req.ResourceData)
 	id := stringField(data, "id")
 	if id == "" {
 		id = req.ResourceID
@@ -211,19 +212,14 @@ func stringField(data map[string]any, key string) string {
 	return s
 }
 
-// intField reads a JSON number (float64 after structpb), json.Number or
-// numeric string.
+// intField reads an integer resource field: int64 or uint64 from the
+// resource body, or a decimal string.
 func intField(data map[string]any, key string) (int, bool) {
 	switch v := data[key].(type) {
-	case float64:
-		return int(v), true
-	case int:
-		return v, true
 	case int64:
 		return int(v), true
-	case json.Number:
-		n, err := strconv.Atoi(v.String())
-		return n, err == nil
+	case uint64:
+		return int(v), v <= math.MaxInt
 	case string:
 		n, err := strconv.Atoi(v)
 		return n, err == nil

@@ -9,27 +9,27 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
 
 type recordingSink struct{ events []string }
 
-func (s *recordingSink) OnAdd(p sdkresource.WatchAddPayload) {
-	s.events = append(s.events, "add "+p.ID)
+func (s *recordingSink) OnAdd(p resourcev2.WatchAddPayload) {
+	s.events = append(s.events, "add "+p.Record.Reference.Address.ID)
 }
-func (s *recordingSink) OnUpdate(p sdkresource.WatchUpdatePayload) {
-	s.events = append(s.events, "update "+p.ID)
+func (s *recordingSink) OnUpdate(p resourcev2.WatchUpdatePayload) {
+	s.events = append(s.events, "update "+p.Record.Reference.Address.ID)
 }
-func (s *recordingSink) OnDelete(p sdkresource.WatchDeletePayload) {
-	s.events = append(s.events, "delete "+p.ID)
+func (s *recordingSink) OnDelete(p resourcev2.WatchDeletePayload) {
+	s.events = append(s.events, "delete "+p.Reference.Address.ID)
 }
-func (s *recordingSink) OnStateChange(e sdkresource.WatchStateEvent) {
-	s.events = append(s.events, "state "+map[sdkresource.WatchState]string{
-		sdkresource.WatchStateSynced:    "synced",
-		sdkresource.WatchStateError:     "error",
-		sdkresource.WatchStateForbidden: "forbidden",
+func (s *recordingSink) OnStateChange(e resourcev2.WatchStateEvent) {
+	s.events = append(s.events, "state "+map[resourcev2.WatchState]string{
+		resourcev2.WatchStateSynced:    "synced",
+		resourcev2.WatchStateError:     "error",
+		resourcev2.WatchStateForbidden: "forbidden",
 	}[e.State])
 }
 
@@ -58,11 +58,11 @@ func TestPollEmitsChangesAndStateTransitions(t *testing.T) {
 
 	sink := &recordingSink{}
 	w := pollWatch{
-		resourcer: clusterKind(metaVM, "virtual machine", proxmox.ResourceTypeVM, "qemu"),
-		client:    client,
-		key:       metaVM.Key(),
-		sink:      sink,
-		seen:      map[string]json.RawMessage{},
+		kind:   clusterKind(typeVM, "Virtual Machines", "virtual machine", proxmox.ResourceTypeVM, "qemu"),
+		client: client,
+		target: resourcev2.ReadTarget{Route: resourcev2.AccessRoute{Connection: "c"}, Provider: providerID, Authority: "a", Type: typeVM},
+		sink:   sink,
+		seen:   map[string]seenEntry{},
 	}
 	var got [][]string
 	for range responses {

@@ -11,21 +11,22 @@ import RelatedResources from '../components/RelatedResources';
 import ResourceMetrics from '../components/ResourceMetrics';
 import ResourceOverview from '../components/ResourceOverview';
 import { GRAPH_RESOURCE_KEYS, METRIC_RESOURCE_KEYS, PLUGIN_ID, RESOURCE_KEYS } from '../constants';
-import { type NativeObject, displayName, kindFor, objectId } from '../utils/columns';
+import { type NativeObject, displayName, kindFor } from '../utils/columns';
+import { type ProxmoxEntry, drawerContextOf } from './useProxmoxResources';
 
 /**
  * Opens the detail drawer of one object: overview, related resources (for
  * kinds in the relationship graph), metrics, a node's guests and raw JSON,
  * with the kind's actions in the header.
  */
-export function useOpenResource(connectionId: string) {
+export function useOpenResource() {
   const { openDrawer } = useRightDrawer();
 
   return useCallback(
-    function open(resourceKey: string, row: NativeObject) {
+    function open(entry: ProxmoxEntry) {
+      const { resourceKey, data } = entry;
       const kind = kindFor(resourceKey);
-      const id = objectId(row, kind);
-      const name = displayName(row, kind);
+      const name = displayName(data, kind);
       const views: DrawerComponent<NativeObject>['views'] = [
         {
           title: 'Overview',
@@ -42,31 +43,29 @@ export function useOpenResource(connectionId: string) {
         views.push({
           title: 'Related',
           icon: <LuWaypoints />,
-          component: () => (
-            <RelatedResources connectionId={connectionId} resourceKey={resourceKey} resourceId={id} onOpen={open} />
-          ),
+          component: () => <RelatedResources entry={entry} onOpen={open} />,
         });
       }
       if (METRIC_RESOURCE_KEYS.has(resourceKey)) {
         views.push({
           title: 'Metrics',
           icon: <LuChartLine />,
-          component: (ctx) => (
-            <ResourceMetrics connectionId={connectionId} resourceKey={resourceKey} resourceId={id} data={ctx.data} />
-          ),
+          component: (ctx) => <ResourceMetrics record={ctx.resource?.record ?? entry.record} />,
         });
       }
       if (resourceKey === RESOURCE_KEYS.node) {
         views.push({
           title: 'Guests',
           icon: <LuServer />,
-          component: () => <NodeGuests connectionId={connectionId} node={String(row.node ?? '')} onOpen={open} />,
+          component: () => (
+            <NodeGuests connectionId={entry.record.route.connection} node={String(data.node ?? '')} onOpen={open} />
+          ),
         });
       }
       views.push({
         title: 'JSON',
         icon: <LuBraces />,
-        component: (ctx) => <CodeBlock language="json" code={JSON.stringify(ctx.data, null, 2)} copyable wrap />,
+        component: (ctx) => <CodeBlock language="json" code={jsonText(ctx.data)} copyable wrap />,
       });
       // Status-dependent actions follow the object while the drawer is open.
       const live = METRIC_RESOURCE_KEYS.has(resourceKey);
@@ -83,11 +82,13 @@ export function useOpenResource(connectionId: string) {
         })),
         actions: resourceActions(resourceKey),
       };
-      openDrawer(drawer, {
-        data: row,
-        resource: { id, name, key: resourceKey, connectionID: connectionId, pluginID: PLUGIN_ID },
-      });
+      openDrawer(drawer, drawerContextOf(entry, name));
     },
-    [openDrawer, connectionId],
+    [openDrawer],
   );
+}
+
+/** Indented JSON; integers beyond 2^53 (bigint once decoded) print as strings. */
+function jsonText(data: unknown): string {
+  return JSON.stringify(data, (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value), 2);
 }

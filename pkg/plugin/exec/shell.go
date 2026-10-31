@@ -3,10 +3,10 @@ package exec
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -46,9 +46,10 @@ type targetFunc func(opts sdkexec.SessionOptions) (proxmox.TermTarget, error)
 // nodeTarget resolves a node shell from a Node object (`node`, or `id`
 // node/<name>).
 func nodeTarget(opts sdkexec.SessionOptions) (proxmox.TermTarget, error) {
-	node := nodeOf(opts.ResourceData)
+	data := proxmox.ResourceData(opts.ResourceData)
+	node := nodeOf(data)
 	if node == "" {
-		if id, _ := opts.ResourceData["id"].(string); strings.HasPrefix(id, "node/") {
+		if id, _ := data["id"].(string); strings.HasPrefix(id, "node/") {
 			node = strings.TrimPrefix(id, "node/")
 		}
 	}
@@ -62,7 +63,7 @@ func nodeTarget(opts sdkexec.SessionOptions) (proxmox.TermTarget, error) {
 // object (`node`, `vmid`, or `id` <type>/<vmid>).
 func guestTarget(guestType string) targetFunc {
 	return func(opts sdkexec.SessionOptions) (proxmox.TermTarget, error) {
-		data := opts.ResourceData
+		data := proxmox.ResourceData(opts.ResourceData)
 		node := nodeOf(data)
 		if node == "" {
 			return proxmox.TermTarget{}, errors.New("resource data has no node")
@@ -101,17 +102,14 @@ func nodeOf(data map[string]any) string {
 	return ""
 }
 
+// intOf reads an integer resource field: int64 or uint64 from the resource
+// body, or a decimal string.
 func intOf(v any) (int, bool) {
 	switch n := v.(type) {
-	case float64:
-		return int(n), n == float64(int(n))
-	case int:
-		return n, true
 	case int64:
 		return int(n), true
-	case json.Number:
-		i, err := strconv.Atoi(n.String())
-		return i, err == nil
+	case uint64:
+		return int(n), n <= math.MaxInt
 	case string:
 		i, err := strconv.Atoi(n)
 		return i, err == nil

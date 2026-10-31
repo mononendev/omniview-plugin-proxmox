@@ -4,7 +4,6 @@ import {
   useConnectionStatus,
   useConnections,
   usePluginRouter,
-  useResources,
   type HomepageCardMeta,
   type HomepageCardProps,
 } from '@omniviewdev/runtime';
@@ -13,10 +12,10 @@ import type { IconType } from 'react-icons';
 import { LuBox, LuMonitor, LuServer, LuUnplug } from 'react-icons/lu';
 import { SiProxmox } from 'react-icons/si';
 
-import { PLUGIN_ID, RESOURCE_KEYS, USAGE_ZONES, connectionPath, resourcePath } from '../../constants';
+import { PAGE_SIZE, PLUGIN_ID, RESOURCE_KEYS, USAGE_ZONES, connectionPath, resourcePath } from '../../constants';
 import { useProxmoxConnection } from '../../hooks/useProxmoxConnection';
+import { useProxmoxResources } from '../../hooks/useProxmoxResources';
 import { summarizeCluster, type Count } from '../../utils/clusterSummary';
-import type { ProxmoxObject } from '../../utils/columns';
 import styles from './ProxmoxHomepageCard.module.css';
 
 export const proxmoxHomepageCardMeta: HomepageCardMeta = {
@@ -56,7 +55,12 @@ export default function ProxmoxHomepageCard({ config }: HomepageCardProps) {
   const { entries } = useConnectionStatus();
 
   const statusById = useMemo(
-    () => new Map(entries.filter((e) => e.pluginID === PLUGIN_ID).map((e) => [e.connectionID, e])),
+    () =>
+      new Map(
+        entries
+          .filter((e) => e.pluginID === PLUGIN_ID && e.readiness === 'CONNECTED')
+          .map((e) => [e.connectionID, e]),
+      ),
     [entries],
   );
   const sorted = useMemo(
@@ -113,19 +117,14 @@ export default function ProxmoxHomepageCard({ config }: HomepageCardProps) {
   );
 }
 
-function useEntries(connectionId: string, resourceKey: string) {
-  const { resources } = useResources({ pluginID: PLUGIN_ID, connectionID: connectionId, resourceKey, idAccessor: 'id' });
-  return resources;
-}
-
 function ConnectedClusterTile({ connection, hasErrors }: { connection: types.Connection; hasErrors: boolean }) {
   const name = connection.name || connection.id;
   const { navigate } = usePluginRouter();
-  const { pending, disconnect } = useProxmoxConnection(connection.id, name, true);
+  const { pending, disconnect } = useProxmoxConnection(connection.id, true);
 
-  const nodes = useEntries(connection.id, RESOURCE_KEYS.node);
-  const virtualMachines = useEntries(connection.id, RESOURCE_KEYS.virtualMachine);
-  const containers = useEntries(connection.id, RESOURCE_KEYS.container);
+  const nodes = useProxmoxResources(connection.id, RESOURCE_KEYS.node);
+  const virtualMachines = useProxmoxResources(connection.id, RESOURCE_KEYS.virtualMachine);
+  const containers = useProxmoxResources(connection.id, RESOURCE_KEYS.container);
   const queries = [nodes, virtualMachines, containers];
   const loading = queries.some((q) => q.isLoading);
   const error = queries.find((q) => q.error)?.error;
@@ -133,11 +132,11 @@ function ConnectedClusterTile({ connection, hasErrors }: { connection: types.Con
   const summary = useMemo(
     () =>
       summarizeCluster(
-        (nodes.data?.result ?? []) as ProxmoxObject[],
-        (virtualMachines.data?.result ?? []) as ProxmoxObject[],
-        (containers.data?.result ?? []) as ProxmoxObject[],
+        nodes.entries.map((e) => e.data),
+        virtualMachines.entries.map((e) => e.data),
+        containers.entries.map((e) => e.data),
       ),
-    [nodes.data, virtualMachines.data, containers.data],
+    [nodes.entries, virtualMachines.entries, containers.entries],
   );
 
   const open = (resourceKey: string) => navigate(resourcePath(connection.id, resourceKey));
@@ -165,7 +164,7 @@ function ConnectedClusterTile({ connection, hasErrors }: { connection: types.Con
 
       {error ? (
         <Text size="xs" className={styles.Problem}>
-          {error.message}
+          {error}
         </Text>
       ) : loading ? (
         <Spinner size="xs" />
@@ -174,6 +173,11 @@ function ConnectedClusterTile({ connection, hasErrors }: { connection: types.Con
           {hasErrors && (
             <Text size="xs" className={styles.Problem}>
               Last refresh failed; figures may be stale
+            </Text>
+          )}
+          {queries.some((q) => q.nextCursor !== undefined) && (
+            <Text size="xs" tone="muted">
+              {`Counts cover the first ${PAGE_SIZE} of each kind`}
             </Text>
           )}
           <div className={styles.Counts}>
@@ -237,7 +241,7 @@ function UsageRow({ label, fraction }: { label: string; fraction: number }) {
 
 function DisconnectedClusterChip({ connection }: { connection: types.Connection }) {
   const name = connection.name || connection.id;
-  const { pending, open } = useProxmoxConnection(connection.id, name, false);
+  const { pending, open } = useProxmoxConnection(connection.id, false);
 
   return (
     <button type="button" className={styles.Chip} title={`Connect to ${name}`} disabled={pending} onClick={open}>

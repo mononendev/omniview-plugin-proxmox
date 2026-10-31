@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 	"github.com/omniviewdev/plugin-sdk/pkg/sdk"
 	"github.com/omniviewdev/plugin-sdk/pkg/types"
 	sdklogs "github.com/omniviewdev/plugin-sdk/pkg/v1/logs"
@@ -58,8 +59,8 @@ func Register(plugin *sdk.Plugin) {
 // sourcesFor builds the single source of a resource: one node's journal,
 // whole or restricted to the daemon's unit.
 func sourcesFor(key string) sdklogs.SourceBuilderFunc {
-	return func(resourceID string, data map[string]any, _ sdklogs.LogSessionOptions) []sdklogs.LogSource {
-		node, unit, err := locate(key, resourceID, data)
+	return func(resourceID string, body *resourcev2.Value, _ sdklogs.LogSessionOptions) []sdklogs.LogSource {
+		node, unit, err := locate(key, resourceID, proxmox.ResourceData(body))
 		if err != nil {
 			return nil
 		}
@@ -118,11 +119,11 @@ func locate(key, resourceID string, data map[string]any) (node, unit string, err
 	if key == keyCephOSD {
 		id, isNum := strings.CutPrefix(name, osdNamePrefix)
 		if _, err := strconv.Atoi(id); !isNum || err != nil {
-			n, ok := data["id"].(float64)
+			n, ok := data["id"].(int64)
 			if !ok {
 				return "", "", fmt.Errorf("cannot tell the OSD id of %q", name)
 			}
-			id = strconv.Itoa(int(n))
+			id = strconv.FormatInt(n, 10)
 		}
 		name = id
 	}

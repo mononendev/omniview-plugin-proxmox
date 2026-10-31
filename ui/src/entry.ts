@@ -4,7 +4,7 @@ import {
   type ExtensionRegistration,
   type SearchRouteHandleV1,
 } from '@omniviewdev/runtime';
-import type { RouteObject } from 'react-router-dom';
+import type { RouteObject } from 'react-router';
 
 import ProxmoxHomepageCard, { proxmoxHomepageCardMeta } from './components/homepage/ProxmoxHomepageCard';
 import { PLUGIN_ID } from './constants';

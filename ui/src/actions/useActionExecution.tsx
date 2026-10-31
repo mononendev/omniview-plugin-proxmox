@@ -14,22 +14,20 @@ import DeleteGuestDialog from './DeleteGuestDialog';
 import EditConfigDialog from './EditConfigDialog';
 
 type Options = {
-  connectionID: string;
-  resourceKey: string;
   /** Runs after a delete from this mount point succeeds, e.g. to close the drawer. */
   onDeleted?: () => void;
 };
 
 /**
- * The runtime hooks actions run with, for one resource kind, plus the
- * dialogs they open. Render `dialogs` wherever the hook is used.
+ * The runtime hooks actions run with, plus the dialogs they open. Render
+ * `dialogs` wherever the hook is used.
  */
-export function useActionExecution({ connectionID, resourceKey, onDeleted }: Options) {
+export function useActionExecution({ onDeleted }: Options = {}) {
   const { show } = useConfirmationModal();
-  const { executeAction } = useExecuteAction({ pluginID: PLUGIN_ID, connectionID, resourceKey });
+  const { executeAction } = useExecuteAction({ pluginID: PLUGIN_ID });
   const { createSession } = useExec({ pluginID: PLUGIN_ID });
   const { createLogSession } = useLogs({ pluginID: PLUGIN_ID });
-  const { update, remove } = useResourceMutations({ pluginID: PLUGIN_ID });
+  const { mutate } = useResourceMutations({ pluginID: PLUGIN_ID });
   const { showSnackbar } = useSnackbar();
   const [editTarget, setEditTarget] = useState<ActionTarget>();
   const [deleteTarget, setDeleteTarget] = useState<ActionTarget>();
@@ -50,12 +48,12 @@ export function useActionExecution({ connectionID, resourceKey, onDeleted }: Opt
   const dialogs = (
     <>
       {editTarget && (
-        <EditConfigDialog target={editTarget} update={update} onClose={() => setEditTarget(undefined)} />
+        <EditConfigDialog target={editTarget} mutate={mutate} onClose={() => setEditTarget(undefined)} />
       )}
       {deleteTarget && (
         <DeleteGuestDialog
           target={deleteTarget}
-          remove={remove}
+          mutate={mutate}
           onClose={() => setDeleteTarget(undefined)}
           onDeleted={() => onDeleted?.()}
         />

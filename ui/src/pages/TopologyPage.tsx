@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { EmptyState, Spinner, Stack, StatusDot, Text, type StatusDotStatus } from '@omniviewdev/base-ui';
 import { ResourceIcon, useResourceGraph } from '@omniviewdev/runtime';
+import type { GraphNode } from '@omniviewdev/runtime/models';
 import { LuCircleAlert, LuNetwork } from 'react-icons/lu';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 
-import { PLUGIN_ID, RESOURCE_KEYS } from '../constants';
+import { PAGE_SIZE, PLUGIN_ID, RESOURCE_KEYS } from '../constants';
 import { type ClusterObject, useClusterObjects } from '../hooks/useClusterObjects';
 import { useOpenResource } from '../hooks/useOpenResource';
 import { type ProxmoxObject, columnStatus, formatBytes } from '../utils/columns';
@@ -55,6 +56,8 @@ type Box = {
   id: string;
   resourceKey: string;
   data?: ProxmoxObject;
+  /** The listed object, for opening it; absent for one not listed (yet). */
+  object?: ClusterObject;
   x: number;
   y: number;
   kicker: string;
@@ -73,17 +76,20 @@ type Link = { from: Box; to: Box; path: string };
  */
 export default function TopologyPage() {
   const { connectionId = '' } = useParams<{ connectionId: string }>();
-  const { objects, nodes, isLoading, error } = useClusterObjects(connectionId);
+  const { objects, truncated, isLoading, error } = useClusterObjects(connectionId);
   const sortedNodes = useMemo(
-    () => [...nodes].sort((a, b) => String(a.node ?? a.id).localeCompare(String(b.node ?? b.id), undefined, { numeric: true })),
-    [nodes],
+    () =>
+      [...objects.values()]
+        .filter((o) => o.resourceKey === RESOURCE_KEYS.node)
+        .sort((a, b) => String(a.data.node ?? a.id).localeCompare(String(b.data.node ?? b.id), undefined, { numeric: true })),
+    [objects],
   );
 
   let body;
   if (error) {
     body = (
       <div style={centerStyle}>
-        <EmptyState icon={<LuCircleAlert />} title="Failed to load the cluster" description={error.message} />
+        <EmptyState icon={<LuCircleAlert />} title="Failed to load the cluster" description={error} />
       </div>
     );
   } else if (isLoading) {
@@ -99,9 +105,7 @@ export default function TopologyPage() {
       </div>
     );
   } else {
-    body = sortedNodes.map((node) => (
-      <NodeBand key={node.id} connectionId={connectionId} node={node} objects={objects} />
-    ));
+    body = sortedNodes.map((entry) => <NodeBand key={entry.id} entry={entry} objects={objects} />);
   }
 
   return (
@@ -112,6 +116,11 @@ export default function TopologyPage() {
         <Text size="sm" tone="muted">
           Guests by node, linked to the storage holding their disks
         </Text>
+        {truncated.length > 0 && (
+          <Text size="sm" tone="warning">
+            {`Only the first ${PAGE_SIZE} ${truncated.join(', ')} are shown`}
+          </Text>
+        )}
       </Stack>
       {body}
     </Stack>
@@ -119,38 +128,39 @@ export default function TopologyPage() {
 }
 
 type NodeBandProps = {
-  connectionId: string;
-  node: ProxmoxObject;
+  entry: ClusterObject;
   objects: Map<string, ClusterObject>;
 };
 
-function NodeBand({ connectionId, node, objects }: NodeBandProps) {
-  const open = useOpenResource(connectionId);
+function NodeBand({ entry, objects }: NodeBandProps) {
+  const node = entry.data;
+  const open = useOpenResource();
   const [hovered, setHovered] = useState<string | null>(null);
   // Guests and storage point at their node; guests also point at storage.
   // Two hops upstream reach both, plus every guest → storage edge between them.
   const { graph, isLoading, error } = useResourceGraph({
     pluginID: PLUGIN_ID,
-    connectionID: connectionId,
-    resourceKey: RESOURCE_KEYS.node,
-    resourceID: node.id,
+    reference: entry.record.record.reference,
+    route: entry.record.route,
     upDepth: 2,
     downDepth: 0,
   });
 
   const layout = useMemo(() => {
     if (!graph) return null;
+    const idOf = (n: GraphNode) => n.reference.address.id;
     const runsHere = new Set(
-      graph.edges.filter((e) => e.type === 'runs_on' && e.target.id === node.id).map((e) => e.source.id),
+      graph.edges.filter((e) => e.type === 'runs_on' && idOf(e.target) === entry.id).map((e) => idOf(e.source)),
     );
     const guests: Box[] = [];
     const storage: Box[] = [];
     for (const { node: n } of graph.nodes) {
-      const obj = objects.get(n.id);
-      if (n.resourceKey === RESOURCE_KEYS.storage) {
-        storage.push(storageBox(n.id, obj?.data));
-      } else if (n.resourceKey === RESOURCE_KEYS.virtualMachine || n.resourceKey === RESOURCE_KEYS.container) {
-        guests.push(guestBox(n.id, n.resourceKey, obj?.data, !runsHere.has(n.id)));
+      const { id, type } = n.reference.address;
+      const object = objects.get(id);
+      if (type === RESOURCE_KEYS.storage) {
+        storage.push({ ...storageBox(id, object?.data), object });
+      } else if (type === RESOURCE_KEYS.virtualMachine || type === RESOURCE_KEYS.container) {
+        guests.push({ ...guestBox(id, type, object?.data, !runsHere.has(id)), object });
       }
     }
     guests.sort(
@@ -171,8 +181,8 @@ function NodeBand({ connectionId, node, objects }: NodeBandProps) {
     const links: Link[] = [];
     for (const e of graph.edges) {
       if (e.type !== 'uses') continue;
-      const from = byId.get(e.source.id);
-      const to = byId.get(e.target.id);
+      const from = byId.get(idOf(e.source));
+      const to = byId.get(idOf(e.target));
       if (!from || !to) continue;
       const x1 = from.x + BOX_W;
       const y1 = from.y + BOX_H / 2;
@@ -189,7 +199,7 @@ function NodeBand({ connectionId, node, objects }: NodeBandProps) {
       storageCount: storage.length,
       height: LABEL_H + rows * (BOX_H + ROW_GAP),
     };
-  }, [graph, node.id, objects]);
+  }, [graph, entry.id, objects]);
 
   const status = columnStatus(node.status, statusColumn);
   const neighbours = new Set<string>();
@@ -254,7 +264,7 @@ function NodeBand({ connectionId, node, objects }: NodeBandProps) {
             box={box}
             dimmed={hovered !== null && !neighbours.has(box.id)}
             onHover={setHovered}
-            onOpen={() => box.data && open(box.resourceKey, box.data)}
+            onOpen={() => box.object && open(box.object)}
           />
         ))}
       </svg>
@@ -267,11 +277,11 @@ function NodeBand({ connectionId, node, objects }: NodeBandProps) {
         style={bandHeaderStyle}
         role="button"
         tabIndex={0}
-        onClick={() => open(RESOURCE_KEYS.node, node)}
+        onClick={() => open(entry)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            open(RESOURCE_KEYS.node, node);
+            open(entry);
           }
         }}
       >

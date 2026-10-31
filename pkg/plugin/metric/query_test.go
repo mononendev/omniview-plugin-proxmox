@@ -10,10 +10,20 @@ import (
 	"testing"
 	"time"
 
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 	sdkmetric "github.com/omniviewdev/plugin-sdk/pkg/v1/metric"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
+
+// body is a resource body as the host passes it.
+func body(fields map[string]any) *resourcev2.Value {
+	v, err := resourcev2.ValueFromNative(fields)
+	if err != nil {
+		panic(err)
+	}
+	return &v
+}
 
 // now anchors every test; the fake RRD holds one sample per minute for the
 // last 70 minutes, with cpu = minute/100 and gaps (nulls) at minutes 3 and 1.
@@ -88,7 +98,7 @@ func TestTimeseriesScalesCPUAndFiltersToTheRange(t *testing.T) {
 	f, client := newFake(t)
 	resp := run(context.Background(), client, kinds[keyNode], sdkmetric.QueryRequest{
 		ResourceKey:  keyNode,
-		ResourceData: map[string]any{"id": "node/ares", "node": "ares"},
+		ResourceData: body(map[string]any{"id": "node/ares", "node": "ares"}),
 		MetricIDs:    []string{"cpu", "memory"},
 		Shape:        sdkmetric.ShapeTimeseries,
 		StartTime:    now.Add(-10 * time.Minute),
@@ -134,7 +144,7 @@ func TestTimeseriesTimeframeFollowsTheRequestedRange(t *testing.T) {
 	} {
 		mustSucceed(t, run(context.Background(), client, kinds[keyVM], sdkmetric.QueryRequest{
 			ResourceKey:  keyVM,
-			ResourceData: map[string]any{"id": "qemu/101", "node": "ares", "vmid": float64(101)},
+			ResourceData: body(map[string]any{"id": "qemu/101", "node": "ares", "vmid": 101}),
 			MetricIDs:    []string{"cpu"},
 			Shape:        sdkmetric.ShapeTimeseries,
 			StartTime:    tc.start,
@@ -150,7 +160,7 @@ func TestCurrentIsTheLatestRecordedSample(t *testing.T) {
 	_, client := newFake(t)
 	results := mustSucceed(t, run(context.Background(), client, kinds[keyContainer], sdkmetric.QueryRequest{
 		ResourceKey:  keyContainer,
-		ResourceData: map[string]any{"id": "lxc/1000", "node": "ares", "vmid": float64(1000)},
+		ResourceData: body(map[string]any{"id": "lxc/1000", "node": "ares", "vmid": 1000}),
 		Shape:        sdkmetric.ShapeCurrent,
 	}, now))
 
@@ -218,7 +228,7 @@ func TestForbiddenNamesThePrivilege(t *testing.T) {
 	f.status = http.StatusForbidden
 	resp := run(context.Background(), client, kinds[keyVM], sdkmetric.QueryRequest{
 		ResourceKey:  keyVM,
-		ResourceData: map[string]any{"node": "ares", "vmid": float64(101)},
+		ResourceData: body(map[string]any{"node": "ares", "vmid": 101}),
 	}, now)
 	if resp.Success || !strings.Contains(resp.Error, "VM.Audit on /vms/101") {
 		t.Errorf("forbidden: %+v", resp)

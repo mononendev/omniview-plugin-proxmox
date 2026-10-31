@@ -27,9 +27,9 @@ func managerSession(t *testing.T, ws func(ctx context.Context, conn *websocket.C
 	t.Cleanup(mgr.Close)
 
 	pctx := &types.PluginContext{Context: context.Background()}
-	sess, err := mgr.CreateSession(pctx, sdkexec.SessionOptions{
+	sess, err := mgr.CreateResourceSession(pctx, sdkexec.SessionOptions{
 		ResourcePlugin: pluginID, ResourceKey: keyNode,
-		ResourceData: map[string]any{"id": "node/ares", "node": "ares"}, TTY: true,
+		ResourceData: body(map[string]any{"id": "node/ares", "node": "ares"}), TTY: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,9 +102,9 @@ func TestManagerCloseSessionWhileConnecting(t *testing.T) {
 	mgr := sdkexec.NewManager(sdkexec.ManagerConfig{Handlers: byKey, Sink: exectest.NewRecordingOutput()})
 	t.Cleanup(mgr.Close)
 	pctx := &types.PluginContext{Context: context.Background()}
-	sess, err := mgr.CreateSession(pctx, sdkexec.SessionOptions{
+	sess, err := mgr.CreateResourceSession(pctx, sdkexec.SessionOptions{
 		ResourcePlugin: pluginID, ResourceKey: keyNode,
-		ResourceData: map[string]any{"id": "node/ares"}, TTY: true,
+		ResourceData: body(map[string]any{"id": "node/ares"}), TTY: true,
 	})
 	if err != nil {
 		t.Fatal(err)

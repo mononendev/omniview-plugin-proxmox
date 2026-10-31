@@ -1,131 +1,167 @@
-// Package resource registers the Proxmox resource capability.
+// Package resource registers the Proxmox resource capability (resource v2).
 package resource
 
 import (
 	"context"
 	"fmt"
+	"sync"
 
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 	"github.com/omniviewdev/plugin-sdk/pkg/sdk"
-	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
-	v1plugin "github.com/omniviewdev/plugin-sdk/pkg/v1/resource/plugin"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
 
-const (
-	group   = "proxmox"
-	version = "v1"
+// providerID is the canonical resource provider, equal to the plugin ID.
+const providerID = "proxmox"
 
-	categoryCluster = "Cluster"
-	categoryCompute = "Compute"
-	categoryCeph    = "Ceph"
+// Resource type IDs. They are opaque to the host; the UI, the exec, log and
+// metric capabilities, and saved UI state all use these exact strings.
+const (
+	typeNode            = "proxmox::v1::Node"
+	typeStorage         = "proxmox::v1::Storage"
+	typeVM              = "proxmox::v1::VirtualMachine"
+	typeContainer       = "proxmox::v1::Container"
+	typeCephCluster     = "proxmox::v1::CephCluster"
+	typeCephPool        = "proxmox::v1::CephPool"
+	typeCephOSD         = "proxmox::v1::CephOSD"
+	typeCephMonitor     = "proxmox::v1::CephMonitor"
+	typeCephManager     = "proxmox::v1::CephManager"
+	typeCephMDS         = "proxmox::v1::CephMetadataServer"
+	typeCephFilesystem  = "proxmox::v1::CephFilesystem"
+	representationID    = "native"
+	representationRev   = "1"
+	catalogRevisionBase = "1"
 )
+
+// staticKinds are served on every connection; cephKinds only on connections
+// whose cluster answered `ceph status` when the connection started.
+var (
+	staticKinds = []*kind{
+		clusterKind(typeNode, "Nodes", "node", proxmox.ResourceTypeNode, "node"),
+		clusterKind(typeStorage, "Storage", "storage", proxmox.ResourceTypeStorage, "storage"),
+		guestKind(typeVM, "Virtual Machines", "virtual machine", "qemu"),
+		guestKind(typeContainer, "Containers", "container", "lxc"),
+	}
+	cephKinds = []*kind{
+		cephKind(typeCephCluster, "Ceph Status", "Ceph cluster", (*proxmox.Client).CephStatus),
+		cephKind(typeCephPool, "Pools", "Ceph pool", (*proxmox.Client).CephPools),
+		cephKind(typeCephOSD, "OSDs", "Ceph OSD", (*proxmox.Client).CephOSDs),
+		cephKind(typeCephMonitor, "Monitors", "Ceph monitor", (*proxmox.Client).CephMonitors),
+		cephKind(typeCephManager, "Managers", "Ceph manager", (*proxmox.Client).CephManagers),
+		cephKind(typeCephMDS, "Metadata Servers", "Ceph metadata server", (*proxmox.Client).CephMetadataServers),
+		cephKind(typeCephFilesystem, "CephFS", "CephFS", (*proxmox.Client).CephFilesystems),
+	}
+)
+
+// Register adds the resource capability to plugin.
+func Register(plugin *sdk.Plugin) {
+	configFiles := func() ([]string, error) { return plugin.SettingsProvider.GetStringSlice(SettingConfigFiles) }
+	p, err := newProvider(configFiles)
+	if err != nil {
+		panic(fmt.Sprintf("build proxmox resource provider: %v", err))
+	}
+	sdk.RegisterResourcePlugin(plugin, p)
+}
+
+// provider is the resource controller plus the relationship declarations the
+// host's graph indexes. Embedding keeps the controller's lifecycle, finite
+// operations, updates and connection contexts.
+type provider struct {
+	*resourcev2.Controller[proxmox.Client]
+}
 
 var (
-	metaNode = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "Node", Label: "Nodes", Category: categoryCluster,
-		Description: "Proxmox VE cluster members.",
-	}
-	metaStorage = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "Storage", Label: "Storage", Category: categoryCluster,
-		Description: "Storage as seen by each node.",
-	}
-	metaVM = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "VirtualMachine", Label: "Virtual Machines", Category: categoryCompute,
-		Description: "QEMU/KVM guests.",
-	}
-	metaContainer = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "Container", Label: "Containers", Category: categoryCompute,
-		Description: "LXC guests.",
-	}
-	metaCephCluster = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephCluster", Label: "Ceph Status", Category: categoryCeph,
-		Description: "Health and capacity of the Ceph cluster (ceph status).",
-	}
-	metaCephPool = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephPool", Label: "Pools", Category: categoryCeph,
-		Description: "Ceph pools.",
-	}
-	metaCephOSD = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephOSD", Label: "OSDs", Category: categoryCeph,
-		Description: "Ceph object storage daemons.",
-	}
-	metaCephMonitor = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephMonitor", Label: "Monitors", Category: categoryCeph,
-		Description: "Ceph monitor daemons.",
-	}
-	metaCephManager = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephManager", Label: "Managers", Category: categoryCeph,
-		Description: "Ceph manager daemons.",
-	}
-	metaCephMDS = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephMetadataServer", Label: "Metadata Servers", Category: categoryCeph,
-		Description: "CephFS metadata server daemons.",
-	}
-	metaCephFS = sdkresource.ResourceMeta{
-		Group: group, Version: version, Kind: "CephFilesystem", Label: "CephFS", Category: categoryCeph,
-		Description: "CephFS file systems.",
-	}
+	_ resourcev2.RelationshipProvider      = (*provider)(nil)
+	_ resourcev2.FeatureNegotiator         = (*provider)(nil)
+	_ resourcev2.ConnectionContextProvider = (*provider)(nil)
 )
 
-// Register adds the resource capability to plugin. Registrations carry no
-// ResourceDefinition: no RPC delivers definitions to the UI, which owns the
-// table columns (ui/src/utils/columns.ts).
-//
-// The Ceph kinds are not static registrations: cephDiscovery adds their types
-// to a connection only when its cluster answers `ceph status`, so a cluster
-// without Ceph has no Ceph section. Exact-key Patterns route them to their
-// resourcers. Discovery lists the static kinds as well, or the SDK would not
-// watch them.
-func Register(plugin *sdk.Plugin) {
-	ceph := []sdkresource.ResourceRegistration[proxmox.Client]{
-		{Meta: metaCephCluster, Resourcer: cephKind(metaCephCluster, "Ceph cluster", (*proxmox.Client).CephStatus)},
-		{Meta: metaCephPool, Resourcer: cephKind(metaCephPool, "Ceph pool", (*proxmox.Client).CephPools)},
-		{Meta: metaCephOSD, Resourcer: cephKind(metaCephOSD, "Ceph OSD", (*proxmox.Client).CephOSDs)},
-		{Meta: metaCephMonitor, Resourcer: cephKind(metaCephMonitor, "Ceph monitor", (*proxmox.Client).CephMonitors)},
-		{Meta: metaCephManager, Resourcer: cephKind(metaCephManager, "Ceph manager", (*proxmox.Client).CephManagers)},
-		{Meta: metaCephMDS, Resourcer: cephKind(metaCephMDS, "Ceph metadata server", (*proxmox.Client).CephMetadataServers)},
-		{Meta: metaCephFS, Resourcer: cephKind(metaCephFS, "CephFS", (*proxmox.Client).CephFilesystems)},
+func newProvider(configFiles func() ([]string, error)) (*provider, error) {
+	state := &cephState{byConnection: map[string]bool{}}
+	all := append(append([]*kind{}, staticKinds...), cephKinds...)
+	registrations := make([]resourcev2.Registration[proxmox.Client], len(all))
+	for i, k := range all {
+		registrations[i] = k.registration()
 	}
-	cephPatterns := make(map[string]sdkresource.Resourcer[proxmox.Client], len(ceph))
-	cephMetas := make([]sdkresource.ResourceMeta, len(ceph))
-	for i, reg := range ceph {
-		cephPatterns[reg.Meta.Key()] = reg.Resourcer
-		cephMetas[i] = reg.Meta
-	}
-
-	static := []sdkresource.ResourceRegistration[proxmox.Client]{
-		{Meta: metaNode, Resourcer: clusterKind(metaNode, "node", proxmox.ResourceTypeNode, "node")},
-		{Meta: metaStorage, Resourcer: clusterKind(metaStorage, "storage", proxmox.ResourceTypeStorage, "storage")},
-		{Meta: metaVM, Resourcer: guestKind(metaVM, "virtual machine", "qemu")},
-		{Meta: metaContainer, Resourcer: guestKind(metaContainer, "container", "lxc")},
-	}
-	staticMetas := make([]sdkresource.ResourceMeta, len(static))
-	for i, reg := range static {
-		staticMetas[i] = reg.Meta
-	}
-
-	cfg := sdkresource.ResourcePluginConfig[proxmox.Client]{
-		Connections: &connectionProvider{},
-		Resources:   static,
-		Patterns:    cephPatterns,
-		Discovery:   &cephDiscovery{static: staticMetas, ceph: cephMetas},
-		Groups: []sdkresource.ResourceGroup{{
-			ID:          group,
-			Name:        "Proxmox VE",
-			Description: "Proxmox VE cluster resources",
-			Resources: map[string][]sdkresource.ResourceMeta{
-				version: staticMetas,
-			},
-		}},
-	}
-
-	controller, err := sdkresource.BuildResourceController(context.Background(), cfg)
-	if err != nil {
-		panic(fmt.Sprintf("build proxmox resource controller: %v", err))
-	}
-	plugin.RegisterCapability("resource", &v1plugin.GRPCPlugin{
-		Impl:             controller,
-		SettingsProvider: plugin.SettingsProvider,
+	controller, err := resourcev2.NewController(resourcev2.Config[proxmox.Client]{
+		Catalog:       state.catalog,
+		Registrations: registrations,
+		Lifecycle:     lifecycle(configFiles, state),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &provider{Controller: controller}, nil
+}
+
+// Features adds the relationship declarations to the controller's traits.
+func (p *provider) Features(ctx context.Context) (resourcev2.FeatureSet, error) {
+	features, err := p.Controller.Features(ctx)
+	if err != nil {
+		return features, err
+	}
+	features.Traits = append(features.Traits, resourcev2.FeatureRelationships)
+	return features, nil
+}
+
+// cephState records, per started connection, whether its cluster runs Ceph.
+// The connection's OnStart hook probes it once; Catalog, which the SDK calls
+// around every operation, only reads it.
+type cephState struct {
+	mu           sync.RWMutex
+	byConnection map[string]bool
+}
+
+func (s *cephState) set(connection string, ceph bool) {
+	s.mu.Lock()
+	s.byConnection[connection] = ceph
+	s.mu.Unlock()
+}
+
+func (s *cephState) forget(connection string) {
+	s.mu.Lock()
+	delete(s.byConnection, connection)
+	s.mu.Unlock()
+}
+
+func (s *cephState) get(connection string) (ceph, probed bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ceph, probed = s.byConnection[connection]
+	return ceph, probed
+}
+
+// catalog lists the static kinds, plus the Ceph kinds when the connection
+// found Ceph as it started. The controller only asks for the catalog of a
+// started connection.
+func (s *cephState) catalog(ctx context.Context, request resourcev2.CatalogRequest) (resourcev2.Catalog, error) {
+	if err := ctx.Err(); err != nil {
+		return resourcev2.Catalog{}, err
+	}
+	ceph, started := s.get(request.Route.Connection)
+	if !started {
+		return resourcev2.Catalog{}, resourcev2.NewError("INVALID_REQUEST", "Connection is not started.")
+	}
+	kinds := staticKinds
+	revision := catalogRevisionBase
+	if ceph {
+		kinds = append(append([]*kind{}, staticKinds...), cephKinds...)
+		revision += "-ceph"
+	}
+	types := make([]resourcev2.ResourceType, len(kinds))
+	for i, k := range kinds {
+		types[i] = k.resourceType()
+	}
+	return resourcev2.Catalog{
+		Provider: providerID, Types: types, Revision: revision, Coverage: resourcev2.Coverage{Kind: "complete"},
+	}, nil
+}
+
+func nativeRepresentation() resourcev2.Representation {
+	return resourcev2.Representation{
+		ID:       representationID,
+		Revision: representationRev,
+		Schema:   resourcev2.SchemaBinding{State: "absent", Validation: "none", Unvalidated: []string{}},
+	}
 }

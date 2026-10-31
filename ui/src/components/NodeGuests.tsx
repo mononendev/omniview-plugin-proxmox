@@ -4,7 +4,8 @@ import { LuServer } from 'react-icons/lu';
 
 import { PLUGIN_ID, RESOURCE_KEYS } from '../constants';
 import { useClusterObjects } from '../hooks/useClusterObjects';
-import { type ProxmoxObject, displayName, formatBytes, kindFor, statusOf } from '../utils/columns';
+import type { ProxmoxEntry } from '../hooks/useProxmoxResources';
+import { displayName, formatBytes, kindFor, statusOf } from '../utils/columns';
 
 const rootStyle = { width: '100%' } as const;
 const centerStyle = { display: 'flex', justifyContent: 'center', padding: '32px 0' } as const;
@@ -17,14 +18,16 @@ type Props = {
   connectionId: string;
   /** The node's name (`node` field). */
   node: string;
-  onOpen: (resourceKey: string, row: ProxmoxObject) => void;
+  onOpen: (entry: ProxmoxEntry) => void;
 };
 
-type Guest = { resourceKey: string; data: ProxmoxObject; name: string; running: boolean };
+type Guest = ProxmoxEntry & { name: string; running: boolean };
+
+const GUEST_KEYS: ReadonlySet<string> = new Set([RESOURCE_KEYS.virtualMachine, RESOURCE_KEYS.container]);
 
 /** Drawer view of a node: the guests placed on it, running first, with live CPU and memory use. */
 export default function NodeGuests({ connectionId, node, onOpen }: Props) {
-  const { virtualMachines, containers, isLoading, error } = useClusterObjects(connectionId);
+  const { objects, isLoading, error } = useClusterObjects(connectionId);
 
   if (isLoading) {
     return (
@@ -34,14 +37,11 @@ export default function NodeGuests({ connectionId, node, onOpen }: Props) {
     );
   }
   if (error) {
-    return <EmptyState size="sm" icon={<LuServer />} title="Could not load guests" description={error.message} />;
+    return <EmptyState size="sm" icon={<LuServer />} title="Could not load guests" description={error} />;
   }
 
-  const guests: Guest[] = [
-    ...virtualMachines.map((data) => ({ resourceKey: RESOURCE_KEYS.virtualMachine, data })),
-    ...containers.map((data) => ({ resourceKey: RESOURCE_KEYS.container, data })),
-  ]
-    .filter(({ data }) => data.node === node)
+  const guests: Guest[] = [...objects.values()]
+    .filter((entry) => GUEST_KEYS.has(entry.resourceKey) && entry.data.node === node)
     .map((g) => ({ ...g, name: displayName(g.data, kindFor(g.resourceKey)), running: g.data.status === 'running' }))
     .sort((a, b) => Number(b.running) - Number(a.running) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 
@@ -72,7 +72,7 @@ export default function NodeGuests({ connectionId, node, onOpen }: Props) {
           {guests.map((g) => {
             const { cpu, maxcpu, mem, maxmem, status } = g.data;
             return (
-              <Table.Row key={g.data.id} interactive onClick={() => onOpen(g.resourceKey, g.data)}>
+              <Table.Row key={g.id} interactive onClick={() => onOpen(g)}>
                 <Table.Cell truncate>
                   <Stack direction="row" align="center" spacing={2}>
                     <ResourceIcon pluginId={PLUGIN_ID} resourceKey={g.resourceKey} size={14} />

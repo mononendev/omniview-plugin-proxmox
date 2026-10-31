@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { IconButton, NavList, Spinner, Stack, StatusDot, Text } from '@omniviewdev/base-ui';
 import {
   ResourceIcon,
@@ -8,9 +8,10 @@ import {
   useResourceTypes,
 } from '@omniviewdev/runtime';
 import { LuChevronLeft, LuLayoutDashboard, LuNetwork, LuPlug, LuUnplug } from 'react-icons/lu';
-import { Outlet, useParams } from 'react-router-dom';
+import { Outlet, useParams } from 'react-router';
 
-import { CATEGORY_ORDER, PLUGIN_ID, overviewPath, resourcePath, topologyPath } from '../constants';
+import { CATEGORY_BY_KEY, CATEGORY_ORDER, PLUGIN_ID, overviewPath, resourcePath, topologyPath } from '../constants';
+import { errorMessage } from '../hooks/useProxmoxResources';
 import { useProxmoxConnection } from '../hooks/useProxmoxConnection';
 
 /** NavList keys of the connection's own pages, also their last path segment; resource keys always contain `::`. */
@@ -47,40 +48,37 @@ function categoryRank(category: string): number {
   return rank === -1 ? CATEGORY_ORDER.length : rank;
 }
 
-/** Connection page: resource kinds from the backend grouped by category, the selected kind's table beside it. */
+/** Connection page: resource types from the backend catalog grouped by category, the selected type's table beside it. */
 export default function ConnectionLayout() {
   const { connectionId = '' } = useParams<{ connectionId: string }>();
   const { navigate, pluginPath } = usePluginRouter();
   const { connection } = useConnection({ pluginID: PLUGIN_ID, connectionID: connectionId });
-  const { types } = useResourceTypes({ pluginID: PLUGIN_ID, connectionID: connectionId });
   const { entries } = useConnectionStatus();
 
   const name = connection.data?.name || connectionId;
-  const isConnected = entries.some((e) => e.pluginID === PLUGIN_ID && e.connectionID === connectionId);
-  const { pending, connect, disconnect } = useProxmoxConnection(connectionId, name, isConnected);
-
-  // Connecting runs the backend's Ceph discovery, which adds the Ceph kinds
-  // to clusters that run Ceph: reload the kinds once connected.
-  const refetchTypes = types.refetch;
-  const wasConnected = useRef(isConnected);
-  useEffect(() => {
-    if (isConnected && !wasConnected.current) void refetchTypes();
-    wasConnected.current = isConnected;
-  }, [isConnected, refetchTypes]);
+  const isConnected = entries.some(
+    (e) => e.pluginID === PLUGIN_ID && e.connectionID === connectionId && e.readiness === 'CONNECTED',
+  );
+  const { pending, connect, disconnect } = useProxmoxConnection(connectionId, isConnected);
+  // The catalog exists only while connected; the Ceph types are in it when connecting found Ceph.
+  const { resourceTypes } = useResourceTypes({
+    pluginID: PLUGIN_ID,
+    route: { connection: connectionId },
+    enabled: isConnected,
+  });
 
   const sections = useMemo<NavSection[]>(() => {
     const byCategory = new Map<string, NavItem[]>();
-    for (const meta of Object.values(types.data ?? {})) {
-      if (!meta) continue;
-      const category = meta.category || 'Other';
+    for (const type of resourceTypes.data ?? []) {
+      const category = CATEGORY_BY_KEY[type.type] ?? 'Other';
       const items = byCategory.get(category) ?? [];
-      items.push({ key: `${meta.group}::${meta.version}::${meta.kind}`, label: meta.label || meta.kind });
+      items.push({ key: type.type, label: type.displayName || type.type });
       byCategory.set(category, items);
     }
     return [...byCategory.entries()]
       .map(([category, items]) => ({ category, items: items.sort((a, b) => a.label.localeCompare(b.label)) }))
       .sort((a, b) => categoryRank(a.category) - categoryRank(b.category) || a.category.localeCompare(b.category));
-  }, [types.data]);
+  }, [resourceTypes.data]);
 
   const selectedMatch = /\/resources\/([^/]+)$/.exec(pluginPath);
   const pageMatch = /\/(overview|topology)$/.exec(pluginPath);
@@ -109,13 +107,13 @@ export default function ConnectionLayout() {
             {isConnected ? <LuUnplug /> : <LuPlug />}
           </IconButton>
         </div>
-        {types.isLoading ? (
+        {resourceTypes.isLoading ? (
           <Stack direction="row" justify="center">
             <Spinner size="sm" />
           </Stack>
-        ) : types.error ? (
+        ) : resourceTypes.error ? (
           <Text size="sm" tone="danger">
-            {types.error.message}
+            {errorMessage(resourceTypes.error)}
           </Text>
         ) : (
           <NavList

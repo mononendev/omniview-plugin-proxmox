@@ -1,14 +1,13 @@
 package resource
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
-	sdkresource "github.com/omniviewdev/plugin-sdk/pkg/v1/resource"
+	resourcev2 "github.com/omniviewdev/plugin-sdk/pkg/resource/v2"
 
 	"github.com/mononendev/omniview-plugin-proxmox/pkg/proxmox"
 )
@@ -25,34 +24,9 @@ const (
 	privConfig    = "VM.Config.*"
 )
 
-// guestResourcer serves a guest kind (qemu or lxc): the cluster listing plus
-// lifecycle and config actions, config updates and deletion. Only guest
-// kinds are guestResourcers, so only they advertise actions.
-type guestResourcer struct {
-	*listResourcer
-	// guestType is the /cluster/resources type and ID prefix: qemu or lxc.
-	guestType string
-}
-
-var (
-	_ sdkresource.Resourcer[proxmox.Client]       = (*guestResourcer)(nil)
-	_ sdkresource.ActionResourcer[proxmox.Client] = (*guestResourcer)(nil)
-	_ sdkresource.ErrorClassifier                 = (*guestResourcer)(nil)
-	_ sdkresource.SyncPolicyDeclarer              = (*guestResourcer)(nil)
-	_ sdkresource.RelationshipDeclarer            = (*guestResourcer)(nil)
-)
-
-// guestKind serves the guests of guestType (qemu or lxc).
-func guestKind(meta sdkresource.ResourceMeta, noun, guestType string) *guestResourcer {
-	return &guestResourcer{
-		listResourcer: clusterKind(meta, noun, proxmox.ResourceTypeVM, guestType),
-		guestType:     guestType,
-	}
-}
-
 // guestAction is one lifecycle action: POST .../status/{id}.
 type guestAction struct {
-	descriptor sdkresource.ActionDescriptor
+	descriptor resourcev2.ActionDescriptor
 	// done is the past-tense verb of the result message: "Started".
 	done string
 	// qemuOnly actions are not offered for containers.
@@ -60,27 +34,27 @@ type guestAction struct {
 }
 
 var guestActions = []guestAction{
-	{done: "Started", descriptor: sdkresource.ActionDescriptor{
+	{done: "Started", descriptor: resourcev2.ActionDescriptor{
 		ID: "start", Label: "Start", Icon: "LuPlay",
 		Description: "Start the guest.",
 	}},
-	{done: "Shut down", descriptor: sdkresource.ActionDescriptor{
+	{done: "Shut down", descriptor: resourcev2.ActionDescriptor{
 		ID: "shutdown", Label: "Shutdown", Icon: "LuPower",
 		Description: "Shut the guest down cleanly (ACPI or the guest agent for VMs, the init system for containers).",
 	}},
-	{done: "Rebooted", descriptor: sdkresource.ActionDescriptor{
+	{done: "Rebooted", descriptor: resourcev2.ActionDescriptor{
 		ID: "reboot", Label: "Reboot", Icon: "LuRotateCw",
 		Description: "Reboot the guest cleanly.",
 	}},
-	{done: "Stopped", descriptor: sdkresource.ActionDescriptor{
+	{done: "Stopped", descriptor: resourcev2.ActionDescriptor{
 		ID: "stop", Label: "Stop", Icon: "LuSquare", Dangerous: true,
 		Description: "Stop the guest immediately, like pulling the power plug. Unsaved guest data is lost.",
 	}},
-	{done: "Suspended", qemuOnly: true, descriptor: sdkresource.ActionDescriptor{
+	{done: "Suspended", qemuOnly: true, descriptor: resourcev2.ActionDescriptor{
 		ID: "suspend", Label: "Pause", Icon: "LuPause",
 		Description: "Pause the virtual machine's execution in memory.",
 	}},
-	{done: "Resumed", qemuOnly: true, descriptor: sdkresource.ActionDescriptor{
+	{done: "Resumed", qemuOnly: true, descriptor: resourcev2.ActionDescriptor{
 		ID: "resume", Label: "Resume", Icon: "LuPlay",
 		Description: "Resume a paused virtual machine.",
 	}},
@@ -88,182 +62,175 @@ var guestActions = []guestAction{
 
 const actionConfig = "config"
 
-var configAction = sdkresource.ActionDescriptor{
+var configAction = resourcev2.ActionDescriptor{
 	ID: actionConfig, Label: "Configuration", Icon: "LuFileText",
 	Description: "Read the guest's configuration and its digest.",
 }
 
-func (r *guestResourcer) actions() []guestAction {
+// actions lists the lifecycle actions of this guest kind.
+func (k *kind) actions() []guestAction {
 	out := make([]guestAction, 0, len(guestActions))
 	for _, a := range guestActions {
-		if a.qemuOnly && r.guestType != "qemu" {
+		if a.qemuOnly && k.guestType != "qemu" {
 			continue
 		}
-		a.descriptor.Scope = sdkresource.ActionScopeInstance
+		a.descriptor.Scope = resourcev2.ActionScopeInstance
 		out = append(out, a)
 	}
 	return out
 }
 
-func (r *guestResourcer) GetActions(
-	context.Context, *proxmox.Client, sdkresource.ResourceMeta,
-) ([]sdkresource.ActionDescriptor, error) {
-	actions := r.actions()
-	out := make([]sdkresource.ActionDescriptor, 0, len(actions)+1)
+// actionDescriptors declares the lifecycle actions plus the config read.
+func (k *kind) actionDescriptors() []resourcev2.ActionDescriptor {
+	actions := k.actions()
+	out := make([]resourcev2.ActionDescriptor, 0, len(actions)+1)
 	for _, a := range actions {
 		out = append(out, a.descriptor)
 	}
 	cfg := configAction
-	cfg.Scope = sdkresource.ActionScopeInstance
-	return append(out, cfg), nil
+	cfg.Scope = resourcev2.ActionScopeInstance
+	return append(out, cfg)
 }
 
-func (r *guestResourcer) ExecuteAction(
-	ctx context.Context,
-	client *proxmox.Client,
-	_ sdkresource.ResourceMeta,
-	actionID string,
-	input sdkresource.ActionInput,
-) (*sdkresource.ActionResult, error) {
-	if actionID == actionConfig {
-		return r.readConfig(ctx, client, input.ID)
+// action runs a guest action. Lifecycle actions return {message, upid};
+// config returns {config, digest, node}.
+func (k *kind) action(ctx context.Context, client *proxmox.Client, request resourcev2.ActionRequest) (resourcev2.Value, error) {
+	if request.TypeTarget != nil {
+		return resourcev2.Value{}, resourcev2.NewError("UNSUPPORTED", "Guest actions act on one guest, not on a type.")
 	}
-	for _, a := range r.actions() {
-		if a.descriptor.ID == actionID {
-			return r.lifecycle(ctx, client, input.ID, a)
+	id := request.Reference.Address.ID
+	if request.Action == actionConfig {
+		return k.readConfig(ctx, client, id)
+	}
+	for _, a := range k.actions() {
+		if a.descriptor.ID == request.Action {
+			return k.lifecycle(ctx, client, id, a)
 		}
 	}
-	return nil, &sdkresource.ResourceOperationError{
+	return resourcev2.Value{}, &resourcev2.ResourceOperationError{
 		Code:    "UNSUPPORTED",
 		Title:   "Unsupported action",
-		Message: "Action " + actionID + " is not available for a " + r.noun + ".",
+		Message: "Action " + request.Action + " is not available for a " + k.noun + ".",
 	}
-}
-
-func (r *guestResourcer) StreamAction(
-	context.Context, *proxmox.Client, sdkresource.ResourceMeta, string, sdkresource.ActionInput, chan<- sdkresource.ActionEvent,
-) error {
-	return unsupported("Streaming actions")
 }
 
 // lifecycle runs a status action and waits, bounded, for its task.
-func (r *guestResourcer) lifecycle(
-	ctx context.Context, client *proxmox.Client, id string, a guestAction,
-) (*sdkresource.ActionResult, error) {
-	what := a.descriptor.ID + " " + r.noun + " " + id
-	g, err := r.find(ctx, client, id)
+func (k *kind) lifecycle(ctx context.Context, client *proxmox.Client, id string, a guestAction) (resourcev2.Value, error) {
+	what := a.descriptor.ID + " " + k.noun + " " + id
+	g, err := k.find(ctx, client, id)
 	if err != nil {
-		return nil, err
+		return resourcev2.Value{}, err
 	}
 	upid, err := client.GuestStatusAction(ctx, g, a.descriptor.ID)
 	if err != nil {
-		return nil, &writeError{privilege: privPowerMgmt, what: what, err: err}
+		return resourcev2.Value{}, &writeError{privilege: privPowerMgmt, what: what, err: err}
 	}
 	done, err := waitTask(ctx, client, g.Node, upid)
 	if err != nil {
-		return nil, &writeError{privilege: privPowerMgmt, what: what, err: err}
+		return resourcev2.Value{}, &writeError{privilege: privPowerMgmt, what: what, err: err}
 	}
-	result := &sdkresource.ActionResult{Success: true, Data: map[string]any{"upid": upid}}
+	message := a.descriptor.Label + " of " + g.Label() + " is still running."
 	if done {
-		result.Message = a.done + " " + g.Label() + "."
-	} else {
-		result.Message = a.descriptor.Label + " of " + g.Label() + " is still running."
+		message = a.done + " " + g.Label() + "."
 	}
-	return result, nil
+	return resourcev2.ValueFromNative(map[string]any{"message": message, "upid": upid})
 }
 
 // readConfig is the read-only config action.
-func (r *guestResourcer) readConfig(ctx context.Context, client *proxmox.Client, id string) (*sdkresource.ActionResult, error) {
-	g, err := r.find(ctx, client, id)
+func (k *kind) readConfig(ctx context.Context, client *proxmox.Client, id string) (resourcev2.Value, error) {
+	g, err := k.find(ctx, client, id)
 	if err != nil {
-		return nil, err
+		return resourcev2.Value{}, err
 	}
 	config, digest, err := client.GuestConfig(ctx, g)
 	if err != nil {
-		return nil, &writeError{privilege: privAudit, what: "read the configuration of " + r.noun + " " + id, err: err}
+		return resourcev2.Value{}, &writeError{privilege: privAudit, what: "read the configuration of " + k.noun + " " + id, err: err}
 	}
-	return &sdkresource.ActionResult{
-		Success: true,
-		Data:    map[string]any{"config": config, "digest": digest, "node": g.Node},
-	}, nil
+	return resourcev2.ValueFromNative(map[string]any{"config": config, "digest": digest, "node": g.Node})
 }
 
-// Update applies UpdateInput.Input, a JSON object of config keys to values,
-// to the guest's config and returns the refreshed guest. A null or "" value
-// deletes the key; "digest" is passed through to reject concurrent changes.
-func (r *guestResourcer) Update(
-	ctx context.Context,
-	client *proxmox.Client,
-	meta sdkresource.ResourceMeta,
-	input sdkresource.UpdateInput,
-) (*sdkresource.UpdateResult, error) {
-	set, del, digest, err := configChanges(input.Input)
-	if err != nil {
-		return nil, err
+// mutate applies a config update or deletes the guest.
+func (k *kind) mutate(ctx context.Context, client *proxmox.Client, request resourcev2.MutationRequest) (resourcev2.Record, error) {
+	switch request.Operation {
+	case "update":
+		if request.ExpectedRevision != nil {
+			return resourcev2.Record{}, resourcev2.NewError("INVALID_REQUEST",
+				"Guest updates take the configuration digest in their input, not an expected revision.")
+		}
+		return k.update(ctx, client, request)
+	case "delete":
+		return k.delete(ctx, client, request.Reference)
+	default:
+		return resourcev2.Record{}, resourcev2.NewError("UNSUPPORTED", "Guests can only be updated or deleted.")
 	}
-	g, err := r.find(ctx, client, input.ID)
+}
+
+// update applies the input, an object of config keys to values, to the
+// guest's config and returns the refreshed guest. A null or "" value deletes
+// the key; "digest" is passed through to reject concurrent changes.
+func (k *kind) update(ctx context.Context, client *proxmox.Client, request resourcev2.MutationRequest) (resourcev2.Record, error) {
+	set, del, digest, err := configChanges(request.Input)
 	if err != nil {
-		return nil, err
+		return resourcev2.Record{}, err
+	}
+	id := request.Reference.Address.ID
+	g, err := k.find(ctx, client, id)
+	if err != nil {
+		return resourcev2.Record{}, err
 	}
 	if len(set) > 0 || len(del) > 0 {
 		if err := client.UpdateGuestConfig(ctx, g, set, del, digest); err != nil {
-			return nil, &writeError{privilege: privConfig, what: "change the configuration of " + r.noun + " " + input.ID, err: err}
+			return resourcev2.Record{}, &writeError{privilege: privConfig, what: "change the configuration of " + k.noun + " " + id, err: err}
 		}
 	}
-	got, err := r.Get(ctx, client, meta, sdkresource.GetInput{ID: input.ID})
-	if err != nil {
-		return nil, err
-	}
-	return &sdkresource.UpdateResult{Result: got.Result, Success: true}, nil
+	return k.get(ctx, client, resourcev2.GetRequest{
+		Route: request.Route, Reference: request.Reference, Representation: representationID,
+	})
 }
 
-// Delete destroys the guest, its unreferenced disks and its backup,
-// replication and HA entries. Proxmox refuses a running guest.
-func (r *guestResourcer) Delete(
-	ctx context.Context,
-	client *proxmox.Client,
-	_ sdkresource.ResourceMeta,
-	input sdkresource.DeleteInput,
-) (*sdkresource.DeleteResult, error) {
-	what := "delete " + r.noun + " " + input.ID
-	g, err := r.find(ctx, client, input.ID)
+// delete destroys the guest, its unreferenced disks and its backup,
+// replication and HA entries, and returns its last listing. Proxmox refuses
+// a running guest.
+func (k *kind) delete(ctx context.Context, client *proxmox.Client, ref resourcev2.ResourceReference) (resourcev2.Record, error) {
+	id := ref.Address.ID
+	what := "delete " + k.noun + " " + id
+	g, err := k.find(ctx, client, id)
 	if err != nil {
-		return nil, err
+		return resourcev2.Record{}, err
 	}
 	upid, err := client.DeleteGuest(ctx, g)
 	if err != nil {
-		return nil, &writeError{privilege: privAllocate, what: what, err: err}
+		return resourcev2.Record{}, &writeError{privilege: privAllocate, what: what, err: err}
 	}
 	if _, err := waitTask(ctx, client, g.Node, upid); err != nil {
-		return nil, &writeError{privilege: privAllocate, what: what, err: err}
+		return resourcev2.Record{}, &writeError{privilege: privAllocate, what: what, err: err}
 	}
-	return &sdkresource.DeleteResult{Result: g.Raw, Success: true}, nil
+	return record(ref, proxmox.Entry{ID: g.ID, Raw: g.Raw})
 }
 
 // find locates a guest of this kind on its current node.
-func (r *guestResourcer) find(ctx context.Context, client *proxmox.Client, id string) (proxmox.GuestRef, error) {
-	if !strings.HasPrefix(id, r.guestType+"/") {
+func (k *kind) find(ctx context.Context, client *proxmox.Client, id string) (proxmox.GuestRef, error) {
+	if !strings.HasPrefix(id, k.guestType+"/") {
 		return proxmox.GuestRef{}, &proxmox.GuestNotFoundError{ID: id}
 	}
 	return client.FindGuest(ctx, id)
 }
 
-// configChanges splits an Update input into the keys to set (as Proxmox
+// configChanges splits an update input into the keys to set (as Proxmox
 // form values), the keys to delete and the digest.
-func configChanges(raw json.RawMessage) (map[string]string, []string, string, error) {
+func configChanges(input resourcev2.Value) (map[string]string, []string, string, error) {
 	invalid := func(msg string) error {
-		return &sdkresource.ResourceOperationError{Code: "INVALID_INPUT", Title: "Invalid configuration", Message: msg}
+		return &resourcev2.ResourceOperationError{Code: "INVALID_INPUT", Title: "Invalid configuration", Message: msg}
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var input map[string]any
-	if err := dec.Decode(&input); err != nil || input == nil {
-		return nil, nil, "", invalid("The update must be a JSON object of configuration keys to values.")
+	native, err := resourcev2.NativeFromValue(input)
+	values, isMap := native.(map[string]any)
+	if err != nil || !isMap {
+		return nil, nil, "", invalid("The update must be an object of configuration keys to values.")
 	}
 	set := map[string]string{}
 	var del []string
 	var digest string
-	for key, value := range input {
+	for key, value := range values {
 		if key == "digest" {
 			s, ok := value.(string)
 			if !ok && value != nil {
@@ -284,14 +251,14 @@ func configChanges(raw json.RawMessage) (map[string]string, []string, string, er
 			} else {
 				set[key] = v
 			}
-		case json.Number:
-			set[key] = v.String()
+		case int64:
+			set[key] = strconv.FormatInt(v, 10)
+		case uint64:
+			set[key] = strconv.FormatUint(v, 10)
+		case float64:
+			set[key] = strconv.FormatFloat(v, 'f', -1, 64)
 		case bool:
-			if v {
-				set[key] = "1"
-			} else {
-				set[key] = "0"
-			}
+			set[key] = map[bool]string{true: "1", false: "0"}[v]
 		default:
 			return nil, nil, "", invalid("The value of " + key + " must be a string, number, boolean or null.")
 		}
