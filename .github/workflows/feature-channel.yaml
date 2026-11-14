@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: omniviewdev/publish-plugin-action/resolve-channel@v1.2.0
+      - uses: omniviewdev/publish-plugin-action/resolve-channel@46937e6bdf076c997b76fb01fc7770c7074d9d9c # v1.3.0
         id: channel
         with:
           kind: plugin
@@ -86,7 +86,7 @@ jobs:
           exit 1
 
       - name: Publish to marketplace
-        uses: omniviewdev/publish-plugin-action@v1.2.0
+        uses: omniviewdev/publish-plugin-action@46937e6bdf076c997b76fb01fc7770c7074d9d9c # v1.3.0
         with:
           api-key: ${{ secrets.OMNIVIEW_API_KEY }}
           api-url: ${{ vars.OMNIVIEW_API_URL }}
